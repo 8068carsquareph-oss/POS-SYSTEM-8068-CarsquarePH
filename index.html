@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.5</title>
+    <title>8068 CAR SQUARE | POS System v8.6</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -217,6 +217,7 @@
             align-items: center;
             gap: 4px;
             transition: all 0.3s;
+            cursor: default;
         }
         .header-user .sync-status.synced { background: rgba(0, 255, 136, 0.1); border-color: rgba(0, 255, 136, 0.3); color: #00ff88; }
         .header-user .sync-status.syncing { background: rgba(255, 170, 0, 0.1); border-color: rgba(255, 170, 0, 0.3); color: #ffaa00; animation: pulse-sync 1s infinite; }
@@ -387,6 +388,8 @@
         .log-console .warn { color: #ffaa00; }
         .log-console .info { color: #00d4ff; }
         .log-console .success { color: #00ff88; }
+        .loading-spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid rgba(0,212,255,0.1); border-top: 2px solid #00d4ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="text-white">
@@ -418,12 +421,12 @@
     let firebaseListeners = [];
     let firebaseIsSyncing = false;
     let firebaseRetryCount = 0;
-    let firebasePendingTransactions = [];
     let firebaseTotalSynced = 0;
     const MAX_RETRIES = 10;
     const RETRY_DELAY = 2000;
     let firebaseLogs = [];
-    let firebaseSyncInterval = null;
+    let isFirebasePrimary = false;
+    let dataLoaded = false;
 
     function addFirebaseLog(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
@@ -444,7 +447,7 @@
     }
 
     function initFirebase() {
-        addFirebaseLog('Initializing Firebase...', 'info');
+        addFirebaseLog('Initializing Firebase as primary storage...', 'info');
         
         if (!firebaseConfig.apiKey) {
             addFirebaseLog('❌ API Key is missing. Please configure Firebase.', 'error');
@@ -473,41 +476,50 @@
                     addFirebaseLog('✅ Firebase connection established', 'success');
                     updateFirebaseStatus('online', 'Connected');
                     firebaseInitialized = true;
+                    isFirebasePrimary = true;
                     setupFirebaseRealtimeListener();
-                    // Auto-sync after connection
-                    setTimeout(() => pullFromFirebase(), 500);
+                    // Load data from Firebase
+                    loadAllDataFromFirebase();
                 } else {
-                    addFirebaseLog('⚠️ Firebase connection lost', 'warn');
+                    addFirebaseLog('⚠️ Firebase connection lost - switching to offline mode', 'warn');
                     updateFirebaseStatus('offline', 'Disconnected');
+                    isFirebasePrimary = false;
+                    // If we have local data, use it
+                    if (!dataLoaded && localStorage.getItem("8068_enterprise_v8")) {
+                        loadLocalData();
+                    }
                 }
             });
 
             return new Promise((resolve) => {
-                // Check connection status
                 const connRef = firebaseDb.ref('.info/connected');
                 connRef.once('value', (snap) => {
                     if (snap.val() === true) {
                         firebaseInitialized = true;
+                        isFirebasePrimary = true;
                         addFirebaseLog('✅ Firebase connected successfully', 'success');
                         updateFirebaseStatus('online', 'Connected');
                         setupFirebaseRealtimeListener();
-                        setTimeout(() => pullFromFirebase(), 500);
+                        loadAllDataFromFirebase();
                         resolve(true);
                     } else {
                         addFirebaseLog('⏳ Waiting for Firebase connection...', 'info');
-                        // Wait for connection
                         setTimeout(() => {
                             connRef.once('value', (snap2) => {
                                 if (snap2.val() === true) {
                                     firebaseInitialized = true;
+                                    isFirebasePrimary = true;
                                     addFirebaseLog('✅ Firebase connected successfully', 'success');
                                     updateFirebaseStatus('online', 'Connected');
                                     setupFirebaseRealtimeListener();
-                                    setTimeout(() => pullFromFirebase(), 500);
+                                    loadAllDataFromFirebase();
                                     resolve(true);
                                 } else {
-                                    addFirebaseLog('❌ Firebase connection failed', 'error');
+                                    addFirebaseLog('⚠️ Firebase connection failed - using local data', 'warn');
+                                    firebaseInitialized = false;
+                                    isFirebasePrimary = false;
                                     updateFirebaseStatus('offline', 'Connection Failed');
+                                    loadLocalData();
                                     resolve(false);
                                 }
                             });
@@ -519,7 +531,9 @@
         } catch(e) {
             addFirebaseLog(`❌ Firebase initialization error: ${e.message}`, 'error');
             firebaseInitialized = false;
+            isFirebasePrimary = false;
             updateFirebaseStatus('error', 'Init Error');
+            loadLocalData();
             return Promise.resolve(false);
         }
     }
@@ -558,90 +572,54 @@
         }
     }
 
-    // ======================== FIREBASE SYNC FUNCTIONS ========================
-    function syncToFirebase(force = false) {
-        if (!firebaseInitialized || !firebaseDb) {
-            addFirebaseLog('❌ Cannot sync: Firebase not initialized', 'error');
-            updateFirebaseStatus('offline', 'Not Connected');
-            return Promise.reject('Firebase not initialized');
-        }
-
-        if (firebaseIsSyncing && !force) {
-            return Promise.resolve('Already syncing');
-        }
-
-        firebaseIsSyncing = true;
-        updateFirebaseStatus('syncing', 'Uploading...');
-        addFirebaseLog('🔄 Starting sync to Firebase...', 'info');
-
-        const dataToSync = {
-            services: appData.services || [],
-            categories: appData.categories || [],
-            customers: appData.customers || [],
-            transactions: appData.transactions || [],
-            openServices: appData.openServices || [],
-            staff: appData.staff || [],
-            expenses: appData.expenses || [],
-            credits: appData.credits || [],
-            inventory: appData.inventory || [],
-            systemSettings: appData.systemSettings || {},
-            users: appData.users || [],
-            currentUser: appData.currentUser || null,
-            nextIds: appData.nextIds || {},
-            commissionMatrix: appData.commissionMatrix || {},
-            lastUpdated: new Date().toISOString(),
-            version: '8.5'
-        };
-
-        const dataSize = JSON.stringify(dataToSync).length;
-        addFirebaseLog(`📦 Syncing ${Object.keys(dataToSync).length} collections (${Math.round(dataSize/1024)} KB)`, 'info');
-
-        return firebaseDb.ref('8068_pos_system_v8').set(dataToSync)
-            .then(() => {
-                firebaseIsSyncing = false;
-                firebaseRetryCount = 0;
-                firebaseTotalSynced++;
-                localStorage.setItem('8068_last_sync_v8', new Date().toISOString());
-                addFirebaseLog('✅ Sync completed successfully!', 'success');
-                updateFirebaseStatus('online', 'Synced ✓');
-                // Update sync count badge
-                const syncEl = document.getElementById('syncStatus');
-                if (syncEl) {
-                    const countEl = syncEl.querySelector('.sync-count');
-                    if (countEl) countEl.textContent = firebaseTotalSynced;
+    // ======================== DATA LOADING ========================
+    function loadLocalData() {
+        const saved = localStorage.getItem("8068_enterprise_v8");
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                Object.assign(appData, parsed);
+                if (!appData.commissionMatrix || Object.keys(appData.commissionMatrix).length === 0) {
+                    appData.commissionMatrix = initializeCommissionMatrix();
                 }
+                if (!appData.openServices) appData.openServices = [];
+                if (!appData.inventory) appData.inventory = [];
+                if (!appData.credits) appData.credits = [];
+                if (!appData.users) appData.users = [
+                    { id: 1, username: "owner", password: "owner123", role: "Owner", name: "Owner", isActive: true },
+                    { id: 2, username: "manager", password: "manager123", role: "Manager", name: "Manager", isActive: true },
+                    { id: 3, username: "cashier", password: "cashier123", role: "Cashier", name: "Cashier", isActive: true },
+                    { id: 4, username: "staff", password: "staff123", role: "Staff", name: "Staff", isActive: true }
+                ];
+                if (!appData.currentUser) appData.currentUser = appData.users[0];
+                if (!appData.systemSettings.defaultPaymentMethods) {
+                    appData.systemSettings.defaultPaymentMethods = ['Cash', 'GCash', 'Maya', 'Credit Card', 'Bank Transfer', 'Credit (Utang)'];
+                }
+                if (!appData.systemSettings.receiptSize) appData.systemSettings.receiptSize = '58mm';
+                if (!appData.systemSettings.receiptHeader) appData.systemSettings.receiptHeader = 'OFFICIAL RECEIPT';
+                if (appData.systemSettings.showVAT === undefined) appData.systemSettings.showVAT = false;
+                dataLoaded = true;
+                addFirebaseLog('📂 Loaded data from localStorage (offline mode)', 'info');
                 return true;
-            })
-            .catch((error) => {
-                firebaseIsSyncing = false;
-                addFirebaseLog(`❌ Sync error: ${error.message}`, 'error');
-                firebaseRetryCount++;
-                if (firebaseRetryCount < MAX_RETRIES) {
-                    addFirebaseLog(`🔄 Retry ${firebaseRetryCount}/${MAX_RETRIES} in ${RETRY_DELAY/1000}s...`, 'warn');
-                    updateFirebaseStatus('syncing', `Retry ${firebaseRetryCount}/${MAX_RETRIES}...`);
-                    setTimeout(() => syncToFirebase(true), RETRY_DELAY);
-                } else {
-                    updateFirebaseStatus('error', 'Sync Failed');
-                }
+            } catch(e) {
+                console.error('Error loading local data:', e);
                 return false;
-            });
+            }
+        }
+        return false;
     }
 
-    function pullFromFirebase() {
-        if (!firebaseInitialized || !firebaseDb) {
-            addFirebaseLog('❌ Cannot pull: Firebase not initialized', 'error');
-            updateFirebaseStatus('offline', 'Not Connected');
-            return Promise.reject('Firebase not initialized');
-        }
-
-        updateFirebaseStatus('syncing', 'Downloading...');
-        addFirebaseLog('🔄 Pulling data from Firebase...', 'info');
-
-        return firebaseDb.ref('8068_pos_system_v8').once('value')
+    function loadAllDataFromFirebase() {
+        if (!firebaseDb) return;
+        
+        addFirebaseLog('📥 Loading data from Firebase...', 'info');
+        updateFirebaseStatus('syncing', 'Loading...');
+        
+        firebaseDb.ref('8068_pos_system_v8').once('value')
             .then((snapshot) => {
                 const data = snapshot.val();
                 if (data) {
-                    addFirebaseLog(`📦 Received data with ${Object.keys(data).length} collections`, 'info');
+                    addFirebaseLog(`📦 Received ${Object.keys(data).length} collections from Firebase`, 'info');
                     let hasChanges = false;
                     const skipKeys = ['lastUpdated', 'version', '_test_connection'];
                     Object.keys(data).forEach(key => {
@@ -682,14 +660,15 @@
                             }
                         }
                     }
+                    dataLoaded = true;
                     if (hasChanges) {
                         saveToLocal();
-                        addFirebaseLog('✅ Data updated from cloud', 'success');
-                        updateFirebaseStatus('online', 'Updated from cloud');
+                        addFirebaseLog('✅ Data loaded from Firebase', 'success');
+                        updateFirebaseStatus('online', 'Synced ✓');
                         renderApp();
                     } else {
-                        addFirebaseLog('✅ Already up to date', 'success');
-                        updateFirebaseStatus('online', 'Already up to date');
+                        addFirebaseLog('✅ Data already up to date', 'success');
+                        updateFirebaseStatus('online', 'Synced ✓');
                     }
                     return true;
                 } else {
@@ -698,8 +677,125 @@
                 }
             })
             .catch((error) => {
-                addFirebaseLog(`❌ Pull error: ${error.message}`, 'error');
-                updateFirebaseStatus('error', 'Pull Failed');
+                addFirebaseLog(`❌ Load error: ${error.message}`, 'error');
+                updateFirebaseStatus('error', 'Load Failed');
+                loadLocalData();
+                return false;
+            });
+    }
+
+    // ======================== FIREBASE SYNC FUNCTIONS ========================
+    function syncToFirebase(force = false) {
+        if (!firebaseInitialized || !firebaseDb) {
+            addFirebaseLog('❌ Cannot sync: Firebase not initialized', 'error');
+            updateFirebaseStatus('offline', 'Not Connected');
+            return Promise.reject('Firebase not initialized');
+        }
+
+        if (firebaseIsSyncing && !force) {
+            return Promise.resolve('Already syncing');
+        }
+
+        firebaseIsSyncing = true;
+        updateFirebaseStatus('syncing', 'Uploading...');
+        addFirebaseLog('🔄 Starting sync to Firebase...', 'info');
+
+        const dataToSync = {
+            services: appData.services || [],
+            categories: appData.categories || [],
+            customers: appData.customers || [],
+            transactions: appData.transactions || [],
+            openServices: appData.openServices || [],
+            staff: appData.staff || [],
+            expenses: appData.expenses || [],
+            credits: appData.credits || [],
+            inventory: appData.inventory || [],
+            systemSettings: appData.systemSettings || {},
+            users: appData.users || [],
+            currentUser: appData.currentUser || null,
+            nextIds: appData.nextIds || {},
+            commissionMatrix: appData.commissionMatrix || {},
+            lastUpdated: new Date().toISOString(),
+            version: '8.6'
+        };
+
+        const dataSize = JSON.stringify(dataToSync).length;
+        addFirebaseLog(`📦 Syncing ${Object.keys(dataToSync).length} collections (${Math.round(dataSize/1024)} KB)`, 'info');
+
+        return firebaseDb.ref('8068_pos_system_v8').set(dataToSync)
+            .then(() => {
+                firebaseIsSyncing = false;
+                firebaseRetryCount = 0;
+                firebaseTotalSynced++;
+                localStorage.setItem('8068_last_sync_v8', new Date().toISOString());
+                addFirebaseLog('✅ Sync completed successfully!', 'success');
+                updateFirebaseStatus('online', 'Synced ✓');
+                const syncEl = document.getElementById('syncStatus');
+                if (syncEl) {
+                    const countEl = syncEl.querySelector('.sync-count');
+                    if (countEl) countEl.textContent = firebaseTotalSynced;
+                }
+                return true;
+            })
+            .catch((error) => {
+                firebaseIsSyncing = false;
+                addFirebaseLog(`❌ Sync error: ${error.message}`, 'error');
+                firebaseRetryCount++;
+                if (firebaseRetryCount < MAX_RETRIES) {
+                    addFirebaseLog(`🔄 Retry ${firebaseRetryCount}/${MAX_RETRIES} in ${RETRY_DELAY/1000}s...`, 'warn');
+                    updateFirebaseStatus('syncing', `Retry ${firebaseRetryCount}/${MAX_RETRIES}...`);
+                    setTimeout(() => syncToFirebase(true), RETRY_DELAY);
+                } else {
+                    updateFirebaseStatus('error', 'Sync Failed');
+                }
+                return false;
+            });
+    }
+
+    function pushToFirebase() {
+        if (!firebaseInitialized || !firebaseDb) {
+            addFirebaseLog('❌ Cannot push: Firebase not initialized', 'error');
+            return Promise.reject('Firebase not initialized');
+        }
+
+        addFirebaseLog('📤 Pushing data to Firebase...', 'info');
+        updateFirebaseStatus('syncing', 'Pushing...');
+
+        const dataToSync = {
+            services: appData.services || [],
+            categories: appData.categories || [],
+            customers: appData.customers || [],
+            transactions: appData.transactions || [],
+            openServices: appData.openServices || [],
+            staff: appData.staff || [],
+            expenses: appData.expenses || [],
+            credits: appData.credits || [],
+            inventory: appData.inventory || [],
+            systemSettings: appData.systemSettings || {},
+            users: appData.users || [],
+            currentUser: appData.currentUser || null,
+            nextIds: appData.nextIds || {},
+            commissionMatrix: appData.commissionMatrix || {},
+            lastUpdated: new Date().toISOString(),
+            version: '8.6'
+        };
+
+        return firebaseDb.ref('8068_pos_system_v8').update(dataToSync)
+            .then(() => {
+                firebaseTotalSynced++;
+                localStorage.setItem('8068_last_sync_v8', new Date().toISOString());
+                addFirebaseLog('✅ Data pushed to Firebase successfully!', 'success');
+                updateFirebaseStatus('online', 'Synced ✓');
+                const syncEl = document.getElementById('syncStatus');
+                if (syncEl) {
+                    const countEl = syncEl.querySelector('.sync-count');
+                    if (countEl) countEl.textContent = firebaseTotalSynced;
+                }
+                return true;
+            })
+            .catch((error) => {
+                addFirebaseLog(`❌ Push error: ${error.message}`, 'error');
+                updateFirebaseStatus('error', 'Push Failed');
                 return false;
             });
     }
@@ -707,17 +803,15 @@
     function setupFirebaseRealtimeListener() {
         if (!firebaseInitialized || !firebaseDb) return;
 
-        // Remove existing listeners
         firebaseListeners.forEach(ref => { try { ref.off(); } catch(e) {} });
         firebaseListeners = [];
 
         addFirebaseLog('🔌 Setting up real-time listener...', 'info');
 
-        // Listen for changes
         const ref = firebaseDb.ref('8068_pos_system_v8');
         ref.on('value', (snapshot) => {
             const data = snapshot.val();
-            if (data && !firebaseIsSyncing) {
+            if (data && !firebaseIsSyncing && isFirebasePrimary) {
                 addFirebaseLog('🔄 Real-time update received from Firebase', 'info');
                 let hasChanges = false;
                 const skipKeys = ['lastUpdated', 'version', '_test_connection'];
@@ -870,8 +964,9 @@
         return "Specialty";
     }
 
+    // Try to load local data first as fallback
     const saved = localStorage.getItem("8068_enterprise_v8");
-    if(saved) {
+    if (saved) {
         try {
             const parsed = JSON.parse(saved);
             appData = { ...appData, ...parsed };
@@ -894,15 +989,16 @@
             if (!appData.systemSettings.receiptSize) appData.systemSettings.receiptSize = '58mm';
             if (!appData.systemSettings.receiptHeader) appData.systemSettings.receiptHeader = 'OFFICIAL RECEIPT';
             if (appData.systemSettings.showVAT === undefined) appData.systemSettings.showVAT = false;
+            dataLoaded = true;
         } catch(e) {}
     }
 
     function saveToLocal() {
         localStorage.setItem("8068_enterprise_v8", JSON.stringify(appData));
         localStorage.setItem("8068_system_last_saved_v8", new Date().toISOString());
-        // Auto-sync to Firebase after save
-        if (firebaseInitialized && !firebaseIsSyncing) {
-            setTimeout(() => syncToFirebase(), 300);
+        // Auto-sync to Firebase after save if connected
+        if (firebaseInitialized && isFirebasePrimary && !firebaseIsSyncing) {
+            setTimeout(() => pushToFirebase(), 300);
         }
     }
 
@@ -937,6 +1033,7 @@
     let dateRangeStart = '';
     let dateRangeEnd = '';
     let mobileNavOpen = false;
+    let isDataLoading = true;
 
     function generateReceiptNo() { return "INV-" + new Date().getFullYear() + "-" + (appData.nextIds.transaction++); }
 
@@ -1427,9 +1524,9 @@
                     ${appData.systemSettings.companyLogo ? `<img src="${appData.systemSettings.companyLogo}" class="mx-auto max-h-20 mb-4">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.5</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.6</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
-                    <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized ? 'Firebase Connected' : 'Firebase Disconnected'}</p>
+                    <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Firebase Connected (Primary)' : 'Offline Mode'}</p>
                 </div>
                 <div class="space-y-4">
                     <div><label class="text-gray-400">Username</label><input type="text" id="loginUser" class="w-full bg-gray-800 p-3 rounded border border-gray-700" placeholder="Enter username" value="owner"></div>
@@ -1548,6 +1645,7 @@
                 <div>
                     <h2 class="text-2xl font-bold"><i class="fas fa-calendar-day"></i> Daily Transaction Management</h2>
                     <p class="text-sm text-gray-400">${today} | ${dailyTx.length} transactions</p>
+                    ${isFirebasePrimary ? `<p class="text-xs text-green-400"><i class="fas fa-cloud"></i> Cloud Synced</p>` : `<p class="text-xs text-yellow-400"><i class="fas fa-exclamation-triangle"></i> Offline Mode</p>`}
                 </div>
                 <div class="flex gap-2 flex-wrap">
                     <input type="text" placeholder="Search..." class="search-input text-sm" id="dailySearchInput" value="${searchQuery}" oninput="updateDailySearch(this.value)">
@@ -2139,7 +2237,7 @@
                     <h3 class="text-2xl font-bold"><i class="fas fa-calendar-week"></i> Weekly Commission Report</h3>
                     <p class="text-sm text-gray-400">${weekStartStr} to ${weekEndStr}</p>
                     <p class="text-xs text-green-400"><i class="fas fa-sync"></i> Auto-calculated from all transactions</p>
-                    ${firebaseInitialized ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Cloud sync enabled</p>` : ''}
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Cloud sync enabled</p>` : ''}
                 </div>
                 <div class="flex gap-2 flex-wrap">
                     <button onclick="exportWeeklyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
@@ -2432,7 +2530,7 @@
                 <div>
                     <h2 class="text-2xl font-bold"><i class="fas fa-hand-holding-usd"></i> Credit (Utang) Management</h2>
                     <p class="text-sm text-gray-400">Total Outstanding: <span class="text-red-400 font-bold">₱${totalCredit.toFixed(2)}</span></p>
-                    ${firebaseInitialized ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Cloud sync enabled</p>` : ''}
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Cloud sync enabled</p>` : ''}
                 </div>
                 <div class="flex gap-2 flex-wrap">
                     <button onclick="showAddCreditModal()" class="bg-green-600 px-3 py-1 rounded text-sm"><i class="fas fa-plus"></i> Add Credit</button>
@@ -2840,7 +2938,7 @@
                 <div>
                     <h2 class="text-2xl font-bold"><i class="fas fa-clipboard-list"></i> Open Services Dashboard</h2>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-sync"></i> Auto-commission sync to Weekly Report | Real-time updates enabled</p>
-                    ${firebaseInitialized ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Cloud sync enabled</p>` : ''}
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Cloud sync enabled</p>` : ''}
                 </div>
                 <div class="flex gap-2">
                     <button onclick="exportOpenServices()" class="excel-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
@@ -3481,11 +3579,11 @@
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.5</div>
+                        <div>v8.6</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
-                    ${firebaseInitialized ? `<div class="mt-1 text-green-400 text-[10px]">🔥 Firebase Connected | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Firebase Disconnected | Click "Configure Firebase" to connect</div>`}
+                    ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400 text-[10px]">🔥 Firebase Connected (Primary) | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Firebase Disconnected | Using localStorage fallback</div>`}
                 </div>
             </div>
             <div class="admin-content card-premium p-5">${content}</div>
@@ -3496,7 +3594,7 @@
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-cloud"></i> Firebase Configuration v8.5</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-cloud"></i> Firebase Configuration v8.6</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -3513,8 +3611,8 @@
                 </div>
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
-                    <p class="text-cyan-400 mt-1">📖 Need help? Get your config from Firebase Console → Project Settings → Service Accounts → Database Secrets</p>
-                    <p class="text-green-400 mt-1">✅ v8.5: Enhanced sync with auto-retry and real-time updates</p>
+                    <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
+                    <p class="text-green-400 mt-1">✅ v8.6: Firebase as primary storage with localStorage fallback</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data are synchronized in real-time</p>
                 </div>
             </div>
@@ -3601,6 +3699,7 @@
                 firebaseApp = null;
                 firebaseDb = null;
                 firebaseInitialized = false;
+                isFirebasePrimary = false;
                 firebaseListeners.forEach(ref => { try { ref.off(); } catch(e) {} });
                 firebaseListeners = [];
             }
@@ -3928,7 +4027,7 @@
                     <span class="text-sm text-gray-400"><i class="fas fa-clock"></i> <span id="liveClock" class="live-clock">Loading...</span></span>
                     <span class="text-xs text-cyan-400 ml-3">👤 ${appData.currentUser?.name} (${appData.currentUser?.role})</span>
                     <button onclick="logout()" class="text-xs text-red-400 ml-3 hover:text-red-300"><i class="fas fa-sign-out-alt"></i> Logout</button>
-                    ${firebaseInitialized ? `<span class="text-xs text-green-400 ml-3"><i class="fas fa-cloud"></i> Online</span>` : `<span class="text-xs text-yellow-400 ml-3"><i class="fas fa-cloud"></i> Offline</span>`}
+                    ${firebaseInitialized && isFirebasePrimary ? `<span class="text-xs text-green-400 ml-3"><i class="fas fa-cloud"></i> Online</span>` : `<span class="text-xs text-yellow-400 ml-3"><i class="fas fa-cloud"></i> Offline</span>`}
                 </div>
             </div>
             <div class="text-sm text-gray-400">${appData.systemSettings.businessHours}</div>
@@ -4652,7 +4751,7 @@
         const s = appData.systemSettings;
         const logoHtml = s.companyLogo ? `<img src="${s.companyLogo}" class="company-logo" style="max-width:120px;max-height:80px;">` : 'No logo uploaded';
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.5</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.6</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -4692,7 +4791,7 @@
                     <div><label class="text-gray-400 text-sm mt-2">Firebase</label>
                         <div class="flex gap-2 flex-wrap">
                             <button onclick="showFirebaseConfig()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-cloud"></i> Configure Firebase</button>
-                            ${firebaseInitialized ? `<span class="text-green-400 text-sm flex items-center"><i class="fas fa-check-circle mr-1"></i> Connected</span>` : `<span class="text-yellow-400 text-sm flex items-center"><i class="fas fa-exclamation-triangle mr-1"></i> Not Connected</span>`}
+                            ${firebaseInitialized && isFirebasePrimary ? `<span class="text-green-400 text-sm flex items-center"><i class="fas fa-check-circle mr-1"></i> Connected (Primary)</span>` : `<span class="text-yellow-400 text-sm flex items-center"><i class="fas fa-exclamation-triangle mr-1"></i> Not Connected</span>`}
                             ${firebaseInitialized ? `<button onclick="syncToFirebase()" class="bg-blue-600 px-3 py-1 rounded text-sm"><i class="fas fa-cloud-upload-alt"></i> Sync Now</button>` : ''}
                             ${firebaseInitialized ? `<button onclick="testFirebaseConnection()" class="bg-purple-600 px-3 py-1 rounded text-sm"><i class="fas fa-vial"></i> Test</button>` : ''}
                         </div>
@@ -4709,14 +4808,14 @@
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.5 Stable | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.6 Stable | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
                 <div class="mt-1 text-cyan-400">📅 Auto-Commission on Service Complete | Real-time Sync</div>
-                ${firebaseInitialized ? `<div class="mt-1 text-green-400">🔥 Firebase: Connected (${firebaseConfig.databaseURL || 'Custom'}) | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🔥 Firebase: Disconnected - Click "Configure Firebase" to connect</div>`}
+                ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🔥 Firebase: Connected (Primary) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🔥 Firebase: Disconnected - Using localStorage fallback</div>`}
             </div>
         </div>`;
     }
@@ -4866,10 +4965,16 @@
 
     // Initialize Firebase on load if configured
     if (firebaseConfig.apiKey && firebaseConfig.databaseURL) {
-        initFirebase();
+        initFirebase().then((success) => {
+            if (!success && !dataLoaded) {
+                loadLocalData();
+                renderApp();
+            }
+        });
     } else {
         updateFirebaseStatus('offline', 'Not Configured');
         addFirebaseLog('ℹ️ Firebase not configured. Click "Configure Firebase" to set up.', 'info');
+        loadLocalData();
     }
 
     document.body.innerHTML = `
@@ -4886,7 +4991,7 @@
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.5</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.6</span></span>
                     </div>
                 </div>
 
@@ -4904,7 +5009,7 @@
                 <div class="header-user">
                     <span class="user-name"><i class="fas fa-user-circle"></i> ${appData.currentUser?.name || 'Guest'}</span>
                     <span class="logout-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</span>
-                    <span id="syncStatus" class="sync-status"><i class="fas fa-cloud"></i> ${firebaseInitialized ? 'Online' : 'Offline'}</span>
+                    <span id="syncStatus" class="sync-status"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online' : 'Offline'}</span>
                     <button class="mobile-nav-toggle" onclick="toggleMobileNav()"><i class="fas fa-bars"></i></button>
                 </div>
             </header>
@@ -4923,23 +5028,23 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.5 Stable | All Export & Print Functions Working | ${firebaseInitialized ? '🔥 Firebase Connected - Real-time Sync ON' : '📡 Offline Mode'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.6 Stable | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🔥 Firebase Connected - Real-time Sync ON' : '📡 Offline Mode'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.5 (Stable)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.6 (Stable)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
-    console.log(`%c🔥 Firebase: ${firebaseInitialized ? 'Connected' : 'Disconnected'}`, 'color: #ffaa00;');
-    console.log('%c🔄 v8.5: Enhanced sync with auto-retry, real-time updates, and transaction tracking', 'color: #00d4ff;');
-    if (!firebaseInitialized) {
+    console.log(`%c🔥 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Primary)' : 'Disconnected (Using localStorage)'}`, 'color: #ffaa00;');
+    console.log('%c🔄 v8.6: Firebase as primary storage with localStorage fallback', 'color: #00d4ff;');
+    if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect to Firebase', 'color: #ff6b6b;');
     } else {
-        console.log('%c✅ Auto-sync enabled - changes will sync across devices automatically in real-time', 'color: #00ff88;');
+        console.log('%c✅ Auto-sync enabled - all data saved to Firebase in real-time', 'color: #00ff88;');
     }
 </script>
 </body>
