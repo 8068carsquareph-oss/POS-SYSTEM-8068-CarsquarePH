@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.4</title>
+    <title>8068 CAR SQUARE | POS System v8.5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -208,7 +208,7 @@
         }
         .header-user .sync-status {
             font-size: 10px;
-            padding: 2px 8px;
+            padding: 2px 10px;
             border-radius: 12px;
             background: rgba(0, 212, 255, 0.1);
             border: 1px solid rgba(0, 212, 255, 0.2);
@@ -216,10 +216,13 @@
             display: flex;
             align-items: center;
             gap: 4px;
+            transition: all 0.3s;
         }
-        .header-user .sync-status.synced { background: rgba(0, 255, 136, 0.1); border-color: rgba(0, 255, 136, 0.2); color: #00ff88; }
-        .header-user .sync-status.syncing { background: rgba(255, 170, 0, 0.1); border-color: rgba(255, 170, 0, 0.2); color: #ffaa00; animation: pulse 1s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .header-user .sync-status.synced { background: rgba(0, 255, 136, 0.1); border-color: rgba(0, 255, 136, 0.3); color: #00ff88; }
+        .header-user .sync-status.syncing { background: rgba(255, 170, 0, 0.1); border-color: rgba(255, 170, 0, 0.3); color: #ffaa00; animation: pulse-sync 1s infinite; }
+        .header-user .sync-status.error { background: rgba(255, 107, 107, 0.1); border-color: rgba(255, 107, 107, 0.3); color: #ff6b6b; }
+        .header-user .sync-status.offline { background: rgba(128, 128, 128, 0.1); border-color: rgba(128, 128, 128, 0.2); color: #888; }
+        @keyframes pulse-sync { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
         /* Mobile nav toggle */
         .mobile-nav-toggle {
@@ -370,6 +373,14 @@
         .commission-report-grid th { background: #0a0a0a; position: sticky; top: 0; z-index: 10; border-bottom: 2px solid #00d4ff; color: #00d4ff; font-size: 10px; text-transform: uppercase; }
         .commission-report-grid .grand-total-row { background: rgba(0, 212, 255, 0.1); border-top: 2px solid #00d4ff; font-weight: bold; }
         .firebase-config-modal textarea { font-family: monospace; font-size: 12px; }
+        .firebase-status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 12px; font-size: 11px; }
+        .firebase-status-badge.online { background: rgba(0, 255, 136, 0.15); color: #00ff88; border: 1px solid rgba(0, 255, 136, 0.2); }
+        .firebase-status-badge.offline { background: rgba(255, 107, 107, 0.15); color: #ff6b6b; border: 1px solid rgba(255, 107, 107, 0.2); }
+        .firebase-status-badge.syncing { background: rgba(255, 170, 0, 0.15); color: #ffaa00; border: 1px solid rgba(255, 170, 0, 0.2); animation: pulse-sync 1s infinite; }
+        .firebase-status-badge .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .firebase-status-badge.online .dot { background: #00ff88; }
+        .firebase-status-badge.offline .dot { background: #ff6b6b; }
+        .firebase-status-badge.syncing .dot { background: #ffaa00; animation: pulse-sync 1s infinite; }
     </style>
 </head>
 <body class="text-white">
@@ -378,7 +389,6 @@
 
 <script>
     // ======================== FIREBASE CONFIGURATION ========================
-    // Default config - user will be prompted to enter their own
     let firebaseConfig = {
         apiKey: "",
         authDomain: "",
@@ -389,8 +399,7 @@
         appId: ""
     };
 
-    // Load Firebase config from localStorage if exists
-    const savedConfig = localStorage.getItem("8068_firebase_config");
+    const savedConfig = localStorage.getItem("8068_firebase_config_v8");
     if (savedConfig) {
         try {
             firebaseConfig = JSON.parse(savedConfig);
@@ -401,119 +410,167 @@
     let firebaseDb = null;
     let firebaseInitialized = false;
     let firebaseListeners = [];
+    let firebaseSyncQueue = [];
+    let firebaseIsSyncing = false;
+    let firebaseRetryCount = 0;
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY = 3000;
 
     function initFirebase() {
         if (firebaseConfig.apiKey && firebaseConfig.databaseURL) {
             try {
-                firebaseApp = firebase.initializeApp(firebaseConfig);
+                // Check if app already exists
+                try {
+                    firebase.app();
+                    firebaseApp = firebase.app();
+                } catch(e) {
+                    firebaseApp = firebase.initializeApp(firebaseConfig);
+                }
                 firebaseDb = firebase.database();
                 firebaseInitialized = true;
+                firebaseRetryCount = 0;
                 console.log('🔥 Firebase initialized successfully');
+                updateFirebaseStatus('online', 'Connected');
+                setupFirebaseRealtimeListener();
+                // Auto-pull data if not synced yet
+                const lastSync = localStorage.getItem('8068_last_sync_v8');
+                if (!lastSync || (Date.now() - new Date(lastSync).getTime() > 60000)) {
+                    setTimeout(() => pullFromFirebase(), 1000);
+                }
                 return true;
             } catch(e) {
                 console.error('Firebase init error:', e);
                 firebaseInitialized = false;
+                updateFirebaseStatus('offline', 'Init Error: ' + e.message);
                 return false;
             }
         }
+        updateFirebaseStatus('offline', 'Not Configured');
         return false;
     }
 
-    // Try to initialize on load
-    initFirebase();
-
-    // ======================== FIREBASE SYNC FUNCTIONS ========================
-    let syncStatus = 'idle'; // idle, syncing, synced, error
-    let syncQueue = [];
-    let isSyncing = false;
-    let lastSyncTime = null;
-
-    function updateSyncStatus(status, message = '') {
-        syncStatus = status;
-        const statusEl = document.getElementById('syncStatus');
+    function updateFirebaseStatus(status, message = '') {
+        const statusEl = document.getElementById('firebaseStatusBadge');
         if (statusEl) {
-            statusEl.className = 'sync-status';
-            if (status === 'synced') {
-                statusEl.classList.add('synced');
-                statusEl.innerHTML = `<i class="fas fa-check-circle"></i> ${message || 'Synced'}`;
+            statusEl.className = 'firebase-status-badge ' + status;
+            const dot = statusEl.querySelector('.dot');
+            const text = statusEl.querySelector('.status-text');
+            if (status === 'online') {
+                statusEl.innerHTML = `<span class="dot"></span><span class="status-text">${message || 'Online'}</span>`;
             } else if (status === 'syncing') {
-                statusEl.classList.add('syncing');
-                statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${message || 'Syncing...'}`;
-            } else if (status === 'error') {
-                statusEl.style.borderColor = 'rgba(255, 107, 107, 0.3)';
-                statusEl.style.color = '#ff6b6b';
-                statusEl.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message || 'Sync Error'}`;
+                statusEl.innerHTML = `<span class="dot"></span><span class="status-text">${message || 'Syncing...'}</span>`;
             } else {
-                statusEl.style.borderColor = 'rgba(0, 212, 255, 0.2)';
-                statusEl.style.color = '#888';
-                statusEl.innerHTML = `<i class="fas fa-cloud"></i> ${message || 'Cloud'}`;
+                statusEl.innerHTML = `<span class="dot"></span><span class="status-text">${message || 'Offline'}</span>`;
             }
         }
-        lastSyncTime = new Date();
+        // Update sync status in header
+        const syncEl = document.getElementById('syncStatus');
+        if (syncEl) {
+            syncEl.className = 'sync-status';
+            if (status === 'online') {
+                syncEl.classList.add('synced');
+                syncEl.innerHTML = `<i class="fas fa-check-circle"></i> Cloud`;
+            } else if (status === 'syncing') {
+                syncEl.classList.add('syncing');
+                syncEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Syncing...`;
+            } else if (status === 'error') {
+                syncEl.classList.add('error');
+                syncEl.innerHTML = `<i class="fas fa-exclamation-circle"></i> Error`;
+            } else {
+                syncEl.classList.add('offline');
+                syncEl.innerHTML = `<i class="fas fa-cloud"></i> Offline`;
+            }
+        }
     }
 
-    function syncToFirebase() {
+    // ======================== FIREBASE SYNC FUNCTIONS ========================
+    function syncToFirebase(force = false) {
         if (!firebaseInitialized || !firebaseDb) {
-            updateSyncStatus('error', 'Firebase not initialized');
+            updateFirebaseStatus('offline', 'Not Connected');
             return Promise.reject('Firebase not initialized');
         }
 
-        return firebaseDb.ref('8068_pos_system').set(dataToSync)
+        if (firebaseIsSyncing && !force) {
+            return Promise.resolve('Already syncing');
+        }
+
+        firebaseIsSyncing = true;
+        updateFirebaseStatus('syncing', 'Uploading...');
 
         const dataToSync = {
-    services: appData.services,
-    categories: appData.categories,
-    customers: appData.customers,
-    transactions: appData.transactions,
-    openServices: appData.openServices,
-    staff: appData.staff,
-    expenses: appData.expenses,
-    credits: appData.credits,
-    inventory: appData.inventory,
-    systemSettings: appData.systemSettings,
-    users: appData.users,
-    currentUser: appData.currentUser,
-    nextIds: appData.nextIds,
-    commissionMatrix: appData.commissionMatrix,
-    lastUpdated: new Date().toISOString()
-};
-return firebaseDb.ref('8068_pos_system').set(dataToSync)
-    .then(() => {
-        updateSyncStatus('synced', 'All data synced');
-        localStorage.setItem(
-            '8068_last_sync',
-            new Date().toISOString()
-        );
-        return true;
-    })
-    .catch((error) => {
-        console.error(error);
-        updateSyncStatus('error', error.message);
-        return false;
-    });
-}
+            services: appData.services,
+            categories: appData.categories,
+            customers: appData.customers,
+            transactions: appData.transactions,
+            openServices: appData.openServices,
+            staff: appData.staff,
+            expenses: appData.expenses,
+            credits: appData.credits,
+            inventory: appData.inventory,
+            systemSettings: appData.systemSettings,
+            users: appData.users,
+            currentUser: appData.currentUser,
+            nextIds: appData.nextIds,
+            commissionMatrix: appData.commissionMatrix,
+            lastUpdated: new Date().toISOString(),
+            version: '8.5'
+        };
+
+        return firebaseDb.ref('8068_pos_system_v8').set(dataToSync)
+            .then(() => {
+                firebaseIsSyncing = false;
+                firebaseRetryCount = 0;
+                localStorage.setItem('8068_last_sync_v8', new Date().toISOString());
+                updateFirebaseStatus('online', 'Synced ✓');
+                console.log('✅ Firebase sync completed successfully');
+                return true;
+            })
+            .catch((error) => {
+                firebaseIsSyncing = false;
+                console.error('Sync error:', error);
+                firebaseRetryCount++;
+                if (firebaseRetryCount < MAX_RETRIES) {
+                    updateFirebaseStatus('syncing', `Retry ${firebaseRetryCount}/${MAX_RETRIES}...`);
+                    setTimeout(() => syncToFirebase(true), RETRY_DELAY);
+                } else {
+                    updateFirebaseStatus('error', 'Sync Failed');
+                }
+                return false;
+            });
+    }
+
     function pullFromFirebase() {
         if (!firebaseInitialized || !firebaseDb) {
-            updateSyncStatus('error', 'Firebase not initialized');
+            updateFirebaseStatus('offline', 'Not Connected');
             return Promise.reject('Firebase not initialized');
         }
 
-        updateSyncStatus('syncing', 'Downloading...');
+        updateFirebaseStatus('syncing', 'Downloading...');
 
-        return firebaseDb.ref('8068_pos_system').once('value')
+        return firebaseDb.ref('8068_pos_system_v8').once('value')
             .then((snapshot) => {
                 const data = snapshot.val();
                 if (data) {
+                    let hasChanges = false;
                     // Merge data carefully
+                    const skipKeys = ['lastUpdated', 'version'];
                     Object.keys(data).forEach(key => {
-                        if (key !== 'lastUpdated' && key !== 'users' && key !== 'currentUser') {
-                            if (appData[key] !== undefined) {
-                                // For arrays, merge carefully
-                                if (Array.isArray(appData[key]) && Array.isArray(data[key])) {
-                                    // Keep the local data if it's newer? For now, just replace
+                        if (skipKeys.includes(key)) return;
+                        if (appData[key] !== undefined && data[key] !== null) {
+                            if (Array.isArray(appData[key]) && Array.isArray(data[key])) {
+                                if (JSON.stringify(appData[key]) !== JSON.stringify(data[key])) {
                                     appData[key] = data[key];
-                                } else {
+                                    hasChanges = true;
+                                }
+                            } else if (typeof appData[key] === 'object' && appData[key] !== null) {
+                                if (JSON.stringify(appData[key]) !== JSON.stringify(data[key])) {
                                     appData[key] = data[key];
+                                    hasChanges = true;
+                                }
+                            } else {
+                                if (appData[key] !== data[key]) {
+                                    appData[key] = data[key];
+                                    hasChanges = true;
                                 }
                             }
                         }
@@ -523,35 +580,48 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                         data.users.forEach(remoteUser => {
                             const localUser = appData.users.find(u => u.id === remoteUser.id);
                             if (localUser) {
-                                // Preserve local password if remote has different
                                 if (!remoteUser.password) {
                                     remoteUser.password = localUser.password;
                                 }
                             }
                         });
-                        appData.users = data.users;
+                        if (JSON.stringify(appData.users) !== JSON.stringify(data.users)) {
+                            appData.users = data.users;
+                            hasChanges = true;
+                        }
                     }
                     // Handle currentUser
                     if (data.currentUser) {
                         const localUser = appData.users.find(u => u.id === data.currentUser.id);
                         if (localUser) {
-                            appData.currentUser = localUser;
+                            if (appData.currentUser?.id !== localUser.id) {
+                                appData.currentUser = localUser;
+                                hasChanges = true;
+                            }
                         } else {
-                            appData.currentUser = data.currentUser;
+                            if (appData.currentUser?.id !== data.currentUser.id) {
+                                appData.currentUser = data.currentUser;
+                                hasChanges = true;
+                            }
                         }
                     }
-                    saveToLocal();
-                    updateSyncStatus('synced', 'Data pulled from cloud');
-                    renderApp();
+                    if (hasChanges) {
+                        saveToLocal();
+                        updateFirebaseStatus('online', 'Updated from cloud');
+                        renderApp();
+                        console.log('✅ Firebase pull completed - data updated');
+                    } else {
+                        updateFirebaseStatus('online', 'Already up to date');
+                    }
                     return true;
                 } else {
                     // No data in Firebase, push local data
-                    return syncToFirebase();
+                    return syncToFirebase(true);
                 }
             })
             .catch((error) => {
                 console.error('Pull error:', error);
-                updateSyncStatus('error', 'Pull failed');
+                updateFirebaseStatus('error', 'Pull Failed');
                 return false;
             });
     }
@@ -560,23 +630,27 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if (!firebaseInitialized || !firebaseDb) return;
 
         // Remove existing listeners
-        firebaseListeners.forEach(ref => ref.off());
+        firebaseListeners.forEach(ref => { try { ref.off(); } catch(e) {} });
         firebaseListeners = [];
 
         // Listen for changes
-        const ref = firebaseDb.ref('8068_pos_system');
+        const ref = firebaseDb.ref('8068_pos_system_v8');
         ref.on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
                 // Only update if not currently syncing (to avoid loops)
-                if (syncStatus !== 'syncing') {
+                if (!firebaseIsSyncing) {
                     console.log('🔄 Real-time update received from Firebase');
-                    // Update data without triggering a full re-sync
                     let hasChanges = false;
+                    const skipKeys = ['lastUpdated', 'version'];
                     Object.keys(data).forEach(key => {
-                        if (key !== 'lastUpdated' && key !== 'users' && key !== 'currentUser') {
-                            if (appData[key] !== undefined && JSON.stringify(appData[key]) !== JSON.stringify(data[key])) {
+                        if (skipKeys.includes(key)) return;
+                        if (appData[key] !== undefined && data[key] !== null) {
+                            if (JSON.stringify(appData[key]) !== JSON.stringify(data[key])) {
                                 if (Array.isArray(appData[key]) && Array.isArray(data[key])) {
+                                    appData[key] = data[key];
+                                    hasChanges = true;
+                                } else if (typeof appData[key] === 'object' && appData[key] !== null) {
                                     appData[key] = data[key];
                                     hasChanges = true;
                                 } else {
@@ -588,11 +662,14 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     });
                     if (hasChanges) {
                         saveToLocal();
-                        updateSyncStatus('synced', 'Updated from cloud');
+                        updateFirebaseStatus('online', 'Updated from cloud');
                         renderApp();
                     }
                 }
             }
+        }, (error) => {
+            console.error('Firebase listener error:', error);
+            updateFirebaseStatus('error', 'Listener Error');
         });
         firebaseListeners.push(ref);
     }
@@ -750,7 +827,11 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
 
     function saveToLocal() {
         localStorage.setItem("8068_enterprise_v8", JSON.stringify(appData));
-        localStorage.setItem("8068_system_last_saved", new Date().toISOString());
+        localStorage.setItem("8068_system_last_saved_v8", new Date().toISOString());
+        // Auto-sync to Firebase after save
+        if (firebaseInitialized) {
+            setTimeout(() => syncToFirebase(), 500);
+        }
     }
 
     function getCommissionAmount(serviceName, size, tierPercent) {
@@ -1274,7 +1355,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     ${appData.systemSettings.companyLogo ? `<img src="${appData.systemSettings.companyLogo}" class="mx-auto max-h-20 mb-4">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.4</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.5</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized ? 'Firebase Connected' : 'Firebase Disconnected'}</p>
                 </div>
@@ -1449,7 +1530,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             if(newVal !== null) {
                 t.plate = newVal;
                 saveToLocal();
-                if (firebaseInitialized) syncToFirebase();
                 renderApp();
             }
         }
@@ -2412,7 +2492,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         };
         appData.openServices.push(openService);
         saveToLocal();
-        if (firebaseInitialized) syncToFirebase();
         return openService;
     }
 
@@ -2425,7 +2504,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 processOpenServiceCommission(service, true);
             }
             saveToLocal();
-            if (firebaseInitialized) syncToFirebase();
             renderApp();
         }
     }
@@ -2471,7 +2549,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         } else {
             service.commissionProcessed = true;
             saveToLocal();
-            if (firebaseInitialized) syncToFirebase();
         }
     }
 
@@ -2523,7 +2600,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             
             saveToLocal();
             recalculateStaffCommissions();
-            if (firebaseInitialized) syncToFirebase();
             triggerSyncAnimation();
         }
     }
@@ -2565,7 +2641,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 existingTx.remarks = (existingTx.remarks || '') + ' (CREDIT - PENDING)';
             }
             saveToLocal();
-            if (firebaseInitialized) syncToFirebase();
         } else {
             const transaction = {
                 id: generateReceiptNo(),
@@ -2588,7 +2663,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             };
             appData.transactions.unshift(transaction);
             saveToLocal();
-            if (firebaseInitialized) syncToFirebase();
             recalculateStaffCommissions();
         }
         
@@ -2605,14 +2679,12 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 status: 'pending'
             });
             saveToLocal();
-            if (firebaseInitialized) syncToFirebase();
         }
         
         service.paidAt = new Date().toISOString();
         service.status = 'paid';
         
         saveToLocal();
-        if (firebaseInitialized) syncToFirebase();
         recalculateStaffCommissions();
         alert(`✅ Payment Completed!\nTotal: ₱${total.toFixed(2)}`);
         
@@ -2630,7 +2702,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if(confirm("Delete this open service?")) {
             appData.openServices = appData.openServices.filter(s => s.id !== id);
             saveToLocal();
-            if (firebaseInitialized) syncToFirebase();
             renderApp();
         }
     }
@@ -3019,7 +3090,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         alert(`✅ SALE COMPLETED!\nTotal: ₱${total.toFixed(2)}${isCredit ? '\n⚠️ CREDIT (UTANG) - PENDING PAYMENT' : ''}`);
         printReceipt(transaction);
         posCart = []; selectedCustomer = null; vehicleInfo = { plate: "", model: "", size: "Medium" }; discount = 0; loyaltyPointsUsed = 0; cashTendered = 0; cartRemarks = "";
-        if (firebaseInitialized) syncToFirebase();
         triggerSyncAnimation();
         renderApp();
     }
@@ -3080,7 +3150,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         alert(msg);
     };
 
-    window.addCustomerPopup = () => { let name = prompt("Customer name:"); if(name) { appData.customers.push({ id: Date.now(), name, mobile: "", loyaltyPoints: 0 }); saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } };
+    window.addCustomerPopup = () => { let name = prompt("Customer name:"); if(name) { appData.customers.push({ id: Date.now(), name, mobile: "", loyaltyPoints: 0 }); saveToLocal(); renderApp(); } };
     window.selectCustomerPopup = () => { let name = prompt("Customer name:"); if(name) { let existing = appData.customers.find(c=>c.name.toLowerCase()===name.toLowerCase()); if(existing) selectedCustomer = existing; else { let newCust = { id: Date.now(), name, loyaltyPoints:0, mobile: "" }; appData.customers.push(newCust); selectedCustomer = newCust; } renderApp(); } };
 
     // ======================== STAFF FUNCTIONS ========================
@@ -3194,45 +3264,45 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         const staff = appData.staff.find(s => s.id === id);
         if(staff) {
             const newName = prompt("Edit staff name:", staff.name);
-            if(newName) { staff.name = newName; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+            if(newName) { staff.name = newName; saveToLocal(); renderApp(); }
         }
     };
     window.editStaffPosition = (id) => {
         const staff = appData.staff.find(s => s.id === id);
         if(staff) {
             const newPos = prompt("Edit position:", staff.position);
-            if(newPos) { staff.position = newPos; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+            if(newPos) { staff.position = newPos; saveToLocal(); renderApp(); }
         }
     };
     window.editStaffCommission = (id) => {
         const staff = appData.staff.find(s => s.id === id);
         if(staff) {
             const newTier = parseInt(prompt("Edit commission tier (30, 35, 40):", staff.commissionTier));
-            if([30,35,40].includes(newTier)) { staff.commissionTier = newTier; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+            if([30,35,40].includes(newTier)) { staff.commissionTier = newTier; saveToLocal(); renderApp(); }
         }
     };
     window.editStaffJobs = (id) => {
         const staff = appData.staff.find(s => s.id === id);
         if(staff) {
             const newJobs = parseInt(prompt("Edit jobs completed:", staff.jobsCompleted || 0));
-            if(!isNaN(newJobs) && newJobs >= 0) { staff.jobsCompleted = newJobs; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+            if(!isNaN(newJobs) && newJobs >= 0) { staff.jobsCompleted = newJobs; saveToLocal(); renderApp(); }
         }
     };
     window.editStaffSales = (id) => {
         const staff = appData.staff.find(s => s.id === id);
         if(staff) {
             const newSales = parseFloat(prompt("Edit sales generated:", staff.salesGenerated || 0));
-            if(!isNaN(newSales) && newSales >= 0) { staff.salesGenerated = newSales; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+            if(!isNaN(newSales) && newSales >= 0) { staff.salesGenerated = newSales; saveToLocal(); renderApp(); }
         }
     };
     window.toggleStaffStatus = (id) => {
         const staff = appData.staff.find(s => s.id === id);
-        if(staff) { staff.isActive = !staff.isActive; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+        if(staff) { staff.isActive = !staff.isActive; saveToLocal(); renderApp(); }
     };
     window.deleteStaffMember = (id) => {
         if(confirm("Delete this staff member?")) {
             appData.staff = appData.staff.filter(s => s.id !== id);
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
     window.addStaffPopup = () => {
@@ -3241,7 +3311,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         let tier = parseInt(prompt("Commission Tier (30, 35, 40):", "35"));
         if([30,35,40].includes(tier)) {
             appData.staff.push({ id: Date.now(), name, position: pos, contact: "", salesGenerated: 0, jobsCompleted: 0, commissionTier: tier, isActive: true, totalCommission: 0 });
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
 
@@ -3339,11 +3409,11 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.4</div>
+                        <div>v8.5</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
-                    ${firebaseInitialized ? `<div class="mt-1 text-cyan-400 text-[10px]">🔥 Firebase Connected | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Firebase Disconnected | Click "Setup Firebase" to connect</div>`}
+                    ${firebaseInitialized ? `<div class="mt-1 text-green-400 text-[10px]">🔥 Firebase Connected | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Firebase Disconnected | Click "Configure Firebase" to connect</div>`}
                 </div>
             </div>
             <div class="admin-content card-premium p-5">${content}</div>
@@ -3354,7 +3424,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-cloud"></i> Firebase Configuration</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-cloud"></i> Firebase Configuration v8.5</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -3371,6 +3441,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Need help? Get your config from Firebase Console → Project Settings → Service Accounts → Database Secrets</p>
+                    <p class="text-green-400 mt-1">✅ v8.5: Enhanced sync with auto-retry and real-time updates</p>
                 </div>
             </div>
         </div></div>`;
@@ -3394,7 +3465,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         }
 
         firebaseConfig = config;
-        localStorage.setItem("8068_firebase_config", JSON.stringify(config));
+        localStorage.setItem("8068_firebase_config_v8", JSON.stringify(config));
 
         // Re-initialize Firebase
         try {
@@ -3846,7 +3917,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             if(newName !== null) {
                 t.customer = newName;
                 saveToLocal();
-                if (firebaseInitialized) syncToFirebase();
                 renderApp();
                 alert("✅ Customer updated!");
             }
@@ -3859,7 +3929,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             if(newVal !== null) {
                 t.vehicle = newVal;
                 saveToLocal();
-                if (firebaseInitialized) syncToFirebase();
                 renderApp();
             }
         }
@@ -3871,7 +3940,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             if(newVal !== null) {
                 t.plate = newVal;
                 saveToLocal();
-                if (firebaseInitialized) syncToFirebase();
                 renderApp();
             }
         }
@@ -3885,7 +3953,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 t.subtotal = newAmt;
                 saveToLocal();
                 recalculateStaffCommissions();
-                if (firebaseInitialized) syncToFirebase();
                 renderApp();
                 alert("✅ Amount updated! Commissions recalculated.");
             }
@@ -3915,7 +3982,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     }
                 }
                 saveToLocal();
-                if (firebaseInitialized) syncToFirebase();
                 renderApp();
             } else if(newVal) {
                 alert("Payment method must be one of: " + methods.join(', '));
@@ -3987,7 +4053,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         
         saveToLocal();
         recalculateStaffCommissions();
-        if (firebaseInitialized) syncToFirebase();
         closeAdminModal();
         alert("✅ Transaction updated! Commissions recalculated.");
         renderApp();
@@ -4003,7 +4068,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         appData.transactions.splice(txIndex, 1);
         recalculateStaffCommissions();
         saveToLocal();
-        if (firebaseInitialized) syncToFirebase();
         renderApp();
         alert("✅ Transaction deleted and commissions updated!");
     };
@@ -4077,7 +4141,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         
         saveToLocal();
         recalculateStaffCommissions();
-        if (firebaseInitialized) syncToFirebase();
         closeAdminModal();
         renderApp();
         alert("✅ Transaction added!");
@@ -4116,7 +4179,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 appData.commissionMatrix[key] = [tier30, tier35, tier40];
             }
         });
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); closeAdminModal(); renderApp(); alert(`✅ Service "${name}" added!`);
+        saveToLocal(); closeAdminModal(); renderApp(); alert(`✅ Service "${name}" added!`);
     };
     window.editServiceName = (id) => { let s = appData.services.find(s=>s.id===id); if(s) { let newName = prompt("New name:", s.name); if(newName) { const oldName = s.name; s.name = newName.toUpperCase(); 
                 const newMatrix = {};
@@ -4129,15 +4192,15 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     }
                 });
                 appData.commissionMatrix = newMatrix;
-                saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } } };
+                saveToLocal(); renderApp(); } } };
     window.editServicePrice = (id) => { let s = appData.services.find(s=>s.id===id); if(s) { let size = prompt("Size to edit:", s.sizes[0]); let price = parseFloat(prompt("New price:")); if(size && price) { s.prices[size] = price; 
                 const key = `${s.name}_${size}`;
                 const tier30 = Math.round(price * 0.26);
                 const tier35 = Math.round(price * 0.30);
                 const tier40 = Math.round(price * 0.35);
                 appData.commissionMatrix[key] = [tier30, tier35, tier40];
-                saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } } };
-    window.toggleServiceStatus = (id) => { let s = appData.services.find(s=>s.id===id); if(s) { s.isActive = !s.isActive; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } };
+                saveToLocal(); renderApp(); } } };
+    window.toggleServiceStatus = (id) => { let s = appData.services.find(s=>s.id===id); if(s) { s.isActive = !s.isActive; saveToLocal(); renderApp(); } };
     window.deleteServiceItem = (id) => { if(confirm("Delete this service?")) { const service = appData.services.find(s => s.id === id); if(service) { 
                 Object.keys(appData.commissionMatrix).forEach(key => {
                     if (key.startsWith(service.name)) {
@@ -4145,7 +4208,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     }
                 });
                 appData.services = appData.services.filter(s => s.id !== id);
-                saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } } };
+                saveToLocal(); renderApp(); } } };
 
     // ======================== ADMIN - CATEGORIES ========================
     function renderAdminCategories() {
@@ -4183,7 +4246,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if(!name) { alert("Category name required!"); return; }
         if(appData.categories.includes(name)) { alert("Category already exists!"); return; }
         appData.categories.push(name);
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); closeAdminModal(); renderApp(); alert(`Category "${name}" added!`);
+        saveToLocal(); closeAdminModal(); renderApp(); alert(`Category "${name}" added!`);
     };
     window.editCategory = (oldName) => {
         const newName = prompt("Edit category name:", oldName);
@@ -4193,7 +4256,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             if(idx !== -1) {
                 appData.categories[idx] = newName.trim();
                 appData.services.forEach(s => { if(s.category === oldName) s.category = newName.trim(); });
-                saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); alert(`Category updated to "${newName}"!`);
+                saveToLocal(); renderApp(); alert(`Category updated to "${newName}"!`);
             }
         }
     };
@@ -4201,7 +4264,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if(confirm(`Delete category "${cat}"?`)) {
             appData.categories = appData.categories.filter(c => c !== cat);
             appData.services.forEach(s => { if(s.category === cat) s.category = "Specialty"; });
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
 
@@ -4227,7 +4290,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         let unit = prompt("Unit:") || "Pieces";
         let reorderLevel = parseInt(prompt("Reorder level:")) || 10;
         appData.inventory.push({ id: Date.now(), name, category, quantity, unit, reorderLevel, price: 0, supplier: "" });
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+        saveToLocal(); renderApp();
     };
     window.editInventory = (id) => {
         let item = appData.inventory.find(i => i.id === id);
@@ -4235,10 +4298,10 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             item.name = prompt("Item name:", item.name) || item.name;
             item.quantity = parseInt(prompt("Quantity:", item.quantity)) || item.quantity;
             item.reorderLevel = parseInt(prompt("Reorder level:", item.reorderLevel)) || item.reorderLevel;
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
-    window.deleteInventory = (id) => { if(confirm("Delete inventory item?")) { appData.inventory = appData.inventory.filter(i => i.id !== id); saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } };
+    window.deleteInventory = (id) => { if(confirm("Delete inventory item?")) { appData.inventory = appData.inventory.filter(i => i.id !== id); saveToLocal(); renderApp(); } };
 
     // ======================== ADMIN - EXPENSES ========================
     function renderAdminExpenses() {
@@ -4283,7 +4346,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if(!desc) { alert("Description required!"); return; }
         if(isNaN(amt) || amt <= 0) { alert("Valid amount required!"); return; }
         appData.expenses.push({ id: Date.now(), description: desc, amount: amt, date: date || new Date().toISOString().slice(0,10), category: cat });
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); closeAdminModal(); renderApp();
+        saveToLocal(); closeAdminModal(); renderApp();
     };
     window.editExpenseFull = (id) => {
         const e = appData.expenses.find(ex => ex.id === id);
@@ -4302,13 +4365,13 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if(!isNaN(amt) && amt > 0) e.amount = amt;
         if(cat) e.category = cat;
         if(date) e.date = date;
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); closeAdminModal(); renderApp();
+        saveToLocal(); closeAdminModal(); renderApp();
     };
-    window.editExpenseDescAdmin = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = prompt("Edit description:", e.description); if(val !== null) { e.description = val; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } } };
-    window.editExpenseAmtAdmin = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = parseFloat(prompt("Edit amount:", e.amount)); if(!isNaN(val) && val > 0) { e.amount = val; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } } };
-    window.editExpenseCategory = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = prompt("Edit category:", e.category || "General"); if(val !== null) { e.category = val; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } } };
-    window.editExpenseDate = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = prompt("Edit date (YYYY-MM-DD):", e.date); if(val !== null) { e.date = val; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } } };
-    window.deleteExpenseItem = (id) => { if(confirm("Delete this expense?")) { appData.expenses = appData.expenses.filter(e => e.id !== id); saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } };
+    window.editExpenseDescAdmin = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = prompt("Edit description:", e.description); if(val !== null) { e.description = val; saveToLocal(); renderApp(); } } };
+    window.editExpenseAmtAdmin = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = parseFloat(prompt("Edit amount:", e.amount)); if(!isNaN(val) && val > 0) { e.amount = val; saveToLocal(); renderApp(); } } };
+    window.editExpenseCategory = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = prompt("Edit category:", e.category || "General"); if(val !== null) { e.category = val; saveToLocal(); renderApp(); } } };
+    window.editExpenseDate = (id) => { const e = appData.expenses.find(ex => ex.id === id); if(e) { const val = prompt("Edit date (YYYY-MM-DD):", e.date); if(val !== null) { e.date = val; saveToLocal(); renderApp(); } } };
+    window.deleteExpenseItem = (id) => { if(confirm("Delete this expense?")) { appData.expenses = appData.expenses.filter(e => e.id !== id); saveToLocal(); renderApp(); } };
 
     // ======================== ADMIN - COMMISSIONS MATRIX ========================
     function renderAdminCommissions() {
@@ -4361,7 +4424,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if (!isNaN(newVal) && newVal >= 0) {
             values[tierIndex] = newVal;
             appData.commissionMatrix[key] = values;
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
     window.editCommissionFull = (key) => {
@@ -4381,13 +4444,13 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         const val40 = parseFloat(document.getElementById('editComm40')?.value);
         if (!isNaN(val30) && !isNaN(val35) && !isNaN(val40)) {
             appData.commissionMatrix[key] = [val30, val35, val40];
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); closeAdminModal(); renderApp();
+            saveToLocal(); closeAdminModal(); renderApp();
         }
     };
     window.deleteCommissionEntry = (key) => {
         if(confirm(`Delete commission entry for "${key}"?`)) {
             delete appData.commissionMatrix[key];
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
     window.showAddCommissionModal = () => {
@@ -4414,7 +4477,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         const key = `${service}_${size}`;
         if (!isNaN(val30) && !isNaN(val35) && !isNaN(val40)) {
             appData.commissionMatrix[key] = [val30, val35, val40];
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); closeAdminModal(); renderApp();
+            saveToLocal(); closeAdminModal(); renderApp();
         }
     };
     window.autoGenerateCommissions = () => {
@@ -4431,13 +4494,13 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     }
                 });
             });
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); alert("Commissions auto-generated!");
+            saveToLocal(); renderApp(); alert("Commissions auto-generated!");
         }
     };
     window.resetCommissionMatrix = () => {
         if(confirm("Reset commission matrix to default?")) {
             appData.commissionMatrix = initializeCommissionMatrix();
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
 
@@ -4458,10 +4521,10 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         let name = prompt("Full name:") || username;
         let role = prompt("Role (Owner/Manager/Cashier/Staff):") || "Staff";
         appData.users.push({ id: Date.now(), username, password, role, name, isActive: true });
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+        saveToLocal(); renderApp();
     };
-    window.toggleUserStatus = (id) => { let u = appData.users.find(u=>u.id===id); if(u) { u.isActive = !u.isActive; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } };
-    window.deleteUser = (id) => { if(confirm("Delete user?")) { appData.users = appData.users.filter(u=>u.id!==id); saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); } };
+    window.toggleUserStatus = (id) => { let u = appData.users.find(u=>u.id===id); if(u) { u.isActive = !u.isActive; saveToLocal(); renderApp(); } };
+    window.deleteUser = (id) => { if(confirm("Delete user?")) { appData.users = appData.users.filter(u=>u.id!==id); saveToLocal(); renderApp(); } };
 
     // ======================== ADMIN - SYSTEM ========================
     function renderAdminSystem() {
@@ -4472,7 +4535,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         const s = appData.systemSettings;
         const logoHtml = s.companyLogo ? `<img src="${s.companyLogo}" class="company-logo" style="max-width:120px;max-height:80px;">` : 'No logo uploaded';
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.5</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -4510,9 +4573,10 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     </div>
                     <div><label class="text-gray-400 text-sm">Business Hours</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer" onclick="editSetting('businessHours')">${s.businessHours}</div></div>
                     <div><label class="text-gray-400 text-sm mt-2">Firebase</label>
-                        <div class="flex gap-2">
+                        <div class="flex gap-2 flex-wrap">
                             <button onclick="showFirebaseConfig()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-cloud"></i> Configure Firebase</button>
                             ${firebaseInitialized ? `<span class="text-green-400 text-sm flex items-center"><i class="fas fa-check-circle mr-1"></i> Connected</span>` : `<span class="text-yellow-400 text-sm flex items-center"><i class="fas fa-exclamation-triangle mr-1"></i> Not Connected</span>`}
+                            ${firebaseInitialized ? `<button onclick="syncToFirebase()" class="bg-blue-600 px-3 py-1 rounded text-sm"><i class="fas fa-cloud-upload-alt"></i> Sync Now</button>` : ''}
                         </div>
                     </div>
                 </div>
@@ -4522,32 +4586,31 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 <button onclick="restoreData()" class="bg-gray-600 p-2 rounded"><i class="fas fa-upload"></i> Restore Backup</button>
                 <button onclick="exportAllData()" class="bg-green-600 p-2 rounded"><i class="fas fa-file-export"></i> Export All Data</button>
                 <button onclick="resetSystem()" class="bg-red-600 p-2 rounded"><i class="fas fa-trash"></i> Reset to Default</button>
-                ${firebaseInitialized ? `<button onclick="syncToFirebase()" class="bg-blue-600 p-2 rounded"><i class="fas fa-cloud-upload-alt"></i> Sync to Cloud</button>` : ''}
                 ${firebaseInitialized ? `<button onclick="pullFromFirebase()" class="bg-purple-600 p-2 rounded"><i class="fas fa-cloud-download-alt"></i> Pull from Cloud</button>` : ''}
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.4 Stable | Last Saved: ${localStorage.getItem('8068_system_last_saved') ? new Date(localStorage.getItem('8068_system_last_saved')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.5 Stable | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
                 <div class="mt-1 text-cyan-400">📅 Auto-Commission on Service Complete | Real-time Sync</div>
-                ${firebaseInitialized ? `<div class="mt-1 text-green-400">🔥 Firebase: Connected (${firebaseConfig.databaseURL || 'Custom'})</div>` : `<div class="mt-1 text-yellow-400">🔥 Firebase: Disconnected - Click "Configure Firebase" to connect</div>`}
+                ${firebaseInitialized ? `<div class="mt-1 text-green-400">🔥 Firebase: Connected (${firebaseConfig.databaseURL || 'Custom'}) | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🔥 Firebase: Disconnected - Click "Configure Firebase" to connect</div>`}
             </div>
         </div>`;
     }
 
     window.updateReceiptSize = (size) => {
         appData.systemSettings.receiptSize = size;
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+        saveToLocal(); renderApp();
         alert(`✅ Receipt size updated to ${size}`);
     };
 
     window.updateShowVAT = (checked) => {
         appData.systemSettings.showVAT = checked;
-        saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+        saveToLocal(); renderApp();
         alert(`✅ VAT display ${checked ? 'enabled' : 'disabled'}`);
     };
 
@@ -4556,7 +4619,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         const newMethods = prompt("Edit payment methods (comma separated):", current);
         if(newMethods) {
             appData.systemSettings.defaultPaymentMethods = newMethods.split(',').map(m => m.trim()).filter(m => m);
-            saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp();
+            saveToLocal(); renderApp();
         }
     };
 
@@ -4571,7 +4634,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                 reader.onload = function(event) {
                     appData.systemSettings.companyLogo = event.target.result;
                     saveToLocal();
-                    if (firebaseInitialized) syncToFirebase();
                     const container = document.getElementById('headerLogoContainer');
                     if (container) {
                         container.innerHTML = `<img src="${appData.systemSettings.companyLogo}" alt="Company Logo" class="w-full h-full object-contain">`;
@@ -4589,7 +4651,6 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if(confirm('Remove company logo?')) {
             appData.systemSettings.companyLogo = null;
             saveToLocal();
-            if (firebaseInitialized) syncToFirebase();
             const container = document.getElementById('headerLogoContainer');
             if (container) {
                 container.innerHTML = `<div class="w-full h-full flex items-center justify-center text-cyan-400 font-bold text-lg border border-cyan-400/30 rounded-lg bg-gray-900">CS</div>`;
@@ -4600,31 +4661,31 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
     };
     window.editSetting = (key) => {
         const val = prompt(`Edit ${key}:`, appData.systemSettings[key]);
-        if(val !== null) { appData.systemSettings[key] = val; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+        if(val !== null) { appData.systemSettings[key] = val; saveToLocal(); renderApp(); }
     };
     window.editLoyalty = () => {
         const val = parseInt(prompt("Loyalty points per ₱1000 spent:", appData.systemSettings.loyaltyPointsPerPeso * 1000));
-        if(!isNaN(val)) { appData.systemSettings.loyaltyPointsPerPeso = val / 1000; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+        if(!isNaN(val)) { appData.systemSettings.loyaltyPointsPerPeso = val / 1000; saveToLocal(); renderApp(); }
     };
     window.editTax = () => {
         const val = parseFloat(prompt("Tax rate (%):", appData.systemSettings.taxRate));
-        if(!isNaN(val)) { appData.systemSettings.taxRate = val; saveToLocal(); if (firebaseInitialized) syncToFirebase(); renderApp(); }
+        if(!isNaN(val)) { appData.systemSettings.taxRate = val; saveToLocal(); renderApp(); }
     };
     window.backupData = () => {
         const dataStr = JSON.stringify(appData);
-        localStorage.setItem("system_backup_8068", dataStr);
+        localStorage.setItem("system_backup_8068_v8", dataStr);
         const blob = new Blob([dataStr], {type: "application/json"});
-        const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `8068_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
+        const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `8068_backup_v8_${new Date().toISOString().slice(0,10)}.json`; a.click();
         alert("Backup created!");
     };
     window.restoreData = () => {
-        const backup = localStorage.getItem("system_backup_8068");
-        if(backup) { try { Object.assign(appData, JSON.parse(backup)); saveToLocal(); if (firebaseInitialized) syncToFirebase(); alert("Restored!"); renderApp(); } catch(e) { alert("Backup corrupted!"); } }
+        const backup = localStorage.getItem("system_backup_8068_v8");
+        if(backup) { try { Object.assign(appData, JSON.parse(backup)); saveToLocal(); alert("Restored!"); renderApp(); } catch(e) { alert("Backup corrupted!"); } }
         else { alert("No backup found!"); }
     };
     window.exportAllData = () => {
         const blob = new Blob([JSON.stringify(appData, null, 2)], {type: "application/json"});
-        const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `8068_full_export_${new Date().toISOString().slice(0,10)}.json`; a.click();
+        const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `8068_full_export_v8_${new Date().toISOString().slice(0,10)}.json`; a.click();
     };
     window.resetSystem = () => {
         if(confirm("WARNING: This will erase ALL data and reset to factory defaults. Continue?")) {
@@ -4684,9 +4745,11 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
         if(nav) nav.classList.toggle('open');
     }
 
-    // Initialize Firebase listener if connected
-    if (firebaseInitialized) {
-        setupFirebaseRealtimeListener();
+    // Initialize Firebase on load if configured
+    if (firebaseConfig.apiKey && firebaseConfig.databaseURL) {
+        initFirebase();
+    } else {
+        updateFirebaseStatus('offline', 'Not Configured');
     }
 
     document.body.innerHTML = `
@@ -4703,7 +4766,7 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.4</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.5</span></span>
                     </div>
                 </div>
 
@@ -4740,22 +4803,23 @@ return firebaseDb.ref('8068_pos_system').set(dataToSync)
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.4 Stable | All Export & Print Functions Working | ${firebaseInitialized ? '🔥 Firebase Connected' : '📡 Offline Mode'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.5 Stable | All Export & Print Functions Working | ${firebaseInitialized ? '🔥 Firebase Connected' : '📡 Offline Mode'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.4 (Stable)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.5 (Stable)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
     console.log(`%c🔥 Firebase: ${firebaseInitialized ? 'Connected' : 'Disconnected'}`, 'color: #ffaa00;');
+    console.log('%c🔄 v8.5: Enhanced sync with auto-retry, better error handling, and real-time updates', 'color: #00d4ff;');
     if (!firebaseInitialized) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect to Firebase', 'color: #ff6b6b;');
     } else {
-        console.log('%c🔄 Real-time sync active - changes will sync across devices automatically', 'color: #00d4ff;');
+        console.log('%c✅ Auto-sync enabled - changes will sync across devices automatically', 'color: #00ff88;');
     }
 </script>
 </body>
