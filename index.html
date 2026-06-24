@@ -458,7 +458,7 @@
             return Promise.reject('Firebase not initialized');
         }
 
-        updateSyncStatus('syncing', 'Uploading...');
+        return firebaseDb.ref('8068_pos_system').set(dataToSync)
 
         const dataToSync = {
     services: appData.services,
