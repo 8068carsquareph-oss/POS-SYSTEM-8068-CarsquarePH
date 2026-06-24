@@ -381,6 +381,11 @@
         .firebase-status-badge.online .dot { background: #00ff88; }
         .firebase-status-badge.offline .dot { background: #ff6b6b; }
         .firebase-status-badge.syncing .dot { background: #ffaa00; animation: pulse-sync 1s infinite; }
+        .log-console { background: #0a0a0a; border: 1px solid #333; border-radius: 8px; padding: 10px; max-height: 150px; overflow-y: auto; font-family: monospace; font-size: 11px; color: #00ff88; }
+        .log-console .error { color: #ff6b6b; }
+        .log-console .warn { color: #ffaa00; }
+        .log-console .info { color: #00d4ff; }
+        .log-console .success { color: #00ff88; }
     </style>
 </head>
 <body class="text-white">
@@ -410,43 +415,91 @@
     let firebaseDb = null;
     let firebaseInitialized = false;
     let firebaseListeners = [];
-    let firebaseSyncQueue = [];
     let firebaseIsSyncing = false;
     let firebaseRetryCount = 0;
     const MAX_RETRIES = 5;
     const RETRY_DELAY = 3000;
+    let firebaseLogs = [];
+
+    function addFirebaseLog(message, type = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        firebaseLogs.push({ message, type, timestamp });
+        if (firebaseLogs.length > 100) firebaseLogs.shift();
+        updateLogConsole();
+        console.log(`[Firebase ${type}] ${message}`);
+    }
+
+    function updateLogConsole() {
+        const logEl = document.getElementById('firebaseLogConsole');
+        if (logEl) {
+            logEl.innerHTML = firebaseLogs.map(log => 
+                `<div class="${log.type}">[${log.timestamp}] ${log.message}</div>`
+            ).join('');
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+    }
 
     function initFirebase() {
-        if (firebaseConfig.apiKey && firebaseConfig.databaseURL) {
+        addFirebaseLog('Initializing Firebase...', 'info');
+        
+        if (!firebaseConfig.apiKey) {
+            addFirebaseLog('❌ API Key is missing. Please configure Firebase.', 'error');
+            updateFirebaseStatus('offline', 'Missing API Key');
+            return false;
+        }
+        
+        if (!firebaseConfig.databaseURL) {
+            addFirebaseLog('❌ Database URL is missing. Please configure Firebase.', 'error');
+            updateFirebaseStatus('offline', 'Missing Database URL');
+            return false;
+        }
+
+        try {
+            // Check if app already exists
             try {
-                // Check if app already exists
-                try {
-                    firebase.app();
-                    firebaseApp = firebase.app();
-                } catch(e) {
-                    firebaseApp = firebase.initializeApp(firebaseConfig);
-                }
-                firebaseDb = firebase.database();
+                firebaseApp = firebase.app();
+                addFirebaseLog('✅ Using existing Firebase app instance', 'success');
+            } catch(e) {
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                addFirebaseLog('✅ Firebase app initialized successfully', 'success');
+            }
+            
+            firebaseDb = firebase.database();
+            
+            // Test connection by writing a test value
+            addFirebaseLog('Testing Firebase connection...', 'info');
+            const testRef = firebaseDb.ref('8068_pos_system_v8/_test_connection');
+            
+            return testRef.set({ 
+                test: 'connection', 
+                timestamp: new Date().toISOString(),
+                device: navigator.userAgent || 'unknown'
+            }).then(() => {
                 firebaseInitialized = true;
                 firebaseRetryCount = 0;
-                console.log('🔥 Firebase initialized successfully');
+                addFirebaseLog('✅ Firebase connection successful!', 'success');
                 updateFirebaseStatus('online', 'Connected');
                 setupFirebaseRealtimeListener();
-                // Auto-pull data if not synced yet
-                const lastSync = localStorage.getItem('8068_last_sync_v8');
-                if (!lastSync || (Date.now() - new Date(lastSync).getTime() > 60000)) {
-                    setTimeout(() => pullFromFirebase(), 1000);
-                }
+                
+                // Auto-pull data after connection
+                setTimeout(() => {
+                    pullFromFirebase();
+                }, 1000);
+                
                 return true;
-            } catch(e) {
-                console.error('Firebase init error:', e);
+            }).catch((error) => {
+                addFirebaseLog(`❌ Connection test failed: ${error.message}`, 'error');
                 firebaseInitialized = false;
-                updateFirebaseStatus('offline', 'Init Error: ' + e.message);
+                updateFirebaseStatus('error', 'Connection Failed');
                 return false;
-            }
+            });
+            
+        } catch(e) {
+            addFirebaseLog(`❌ Firebase initialization error: ${e.message}`, 'error');
+            firebaseInitialized = false;
+            updateFirebaseStatus('error', 'Init Error');
+            return false;
         }
-        updateFirebaseStatus('offline', 'Not Configured');
-        return false;
     }
 
     function updateFirebaseStatus(status, message = '') {
@@ -486,16 +539,19 @@
     // ======================== FIREBASE SYNC FUNCTIONS ========================
     function syncToFirebase(force = false) {
         if (!firebaseInitialized || !firebaseDb) {
+            addFirebaseLog('❌ Cannot sync: Firebase not initialized', 'error');
             updateFirebaseStatus('offline', 'Not Connected');
             return Promise.reject('Firebase not initialized');
         }
 
         if (firebaseIsSyncing && !force) {
+            addFirebaseLog('⏳ Sync already in progress...', 'warn');
             return Promise.resolve('Already syncing');
         }
 
         firebaseIsSyncing = true;
         updateFirebaseStatus('syncing', 'Uploading...');
+        addFirebaseLog('🔄 Starting sync to Firebase...', 'info');
 
         const dataToSync = {
             services: appData.services,
@@ -513,23 +569,28 @@
             nextIds: appData.nextIds,
             commissionMatrix: appData.commissionMatrix,
             lastUpdated: new Date().toISOString(),
-            version: '8.5'
+            version: '8.5',
+            device: navigator.userAgent || 'unknown'
         };
+
+        const dataSize = JSON.stringify(dataToSync).length;
+        addFirebaseLog(`📦 Syncing ${Object.keys(dataToSync).length} collections (${Math.round(dataSize/1024)} KB)`, 'info');
 
         return firebaseDb.ref('8068_pos_system_v8').set(dataToSync)
             .then(() => {
                 firebaseIsSyncing = false;
                 firebaseRetryCount = 0;
                 localStorage.setItem('8068_last_sync_v8', new Date().toISOString());
+                addFirebaseLog('✅ Sync completed successfully!', 'success');
                 updateFirebaseStatus('online', 'Synced ✓');
-                console.log('✅ Firebase sync completed successfully');
                 return true;
             })
             .catch((error) => {
                 firebaseIsSyncing = false;
-                console.error('Sync error:', error);
+                addFirebaseLog(`❌ Sync error: ${error.message}`, 'error');
                 firebaseRetryCount++;
                 if (firebaseRetryCount < MAX_RETRIES) {
+                    addFirebaseLog(`🔄 Retry ${firebaseRetryCount}/${MAX_RETRIES} in ${RETRY_DELAY/1000}s...`, 'warn');
                     updateFirebaseStatus('syncing', `Retry ${firebaseRetryCount}/${MAX_RETRIES}...`);
                     setTimeout(() => syncToFirebase(true), RETRY_DELAY);
                 } else {
@@ -541,19 +602,21 @@
 
     function pullFromFirebase() {
         if (!firebaseInitialized || !firebaseDb) {
+            addFirebaseLog('❌ Cannot pull: Firebase not initialized', 'error');
             updateFirebaseStatus('offline', 'Not Connected');
             return Promise.reject('Firebase not initialized');
         }
 
         updateFirebaseStatus('syncing', 'Downloading...');
+        addFirebaseLog('🔄 Pulling data from Firebase...', 'info');
 
         return firebaseDb.ref('8068_pos_system_v8').once('value')
             .then((snapshot) => {
                 const data = snapshot.val();
                 if (data) {
+                    addFirebaseLog(`📦 Received data with ${Object.keys(data).length} collections`, 'info');
                     let hasChanges = false;
-                    // Merge data carefully
-                    const skipKeys = ['lastUpdated', 'version'];
+                    const skipKeys = ['lastUpdated', 'version', 'device', '_test_connection'];
                     Object.keys(data).forEach(key => {
                         if (skipKeys.includes(key)) return;
                         if (appData[key] !== undefined && data[key] !== null) {
@@ -575,7 +638,7 @@
                             }
                         }
                     });
-                    // Handle users separately - merge but don't override passwords
+                    // Handle users separately
                     if (data.users) {
                         data.users.forEach(remoteUser => {
                             const localUser = appData.users.find(u => u.id === remoteUser.id);
@@ -590,7 +653,6 @@
                             hasChanges = true;
                         }
                     }
-                    // Handle currentUser
                     if (data.currentUser) {
                         const localUser = appData.users.find(u => u.id === data.currentUser.id);
                         if (localUser) {
@@ -607,23 +669,48 @@
                     }
                     if (hasChanges) {
                         saveToLocal();
+                        addFirebaseLog('✅ Data updated from cloud', 'success');
                         updateFirebaseStatus('online', 'Updated from cloud');
                         renderApp();
-                        console.log('✅ Firebase pull completed - data updated');
                     } else {
+                        addFirebaseLog('✅ Already up to date', 'success');
                         updateFirebaseStatus('online', 'Already up to date');
                     }
                     return true;
                 } else {
-                    // No data in Firebase, push local data
+                    addFirebaseLog('ℹ️ No data in Firebase, uploading local data...', 'info');
                     return syncToFirebase(true);
                 }
             })
             .catch((error) => {
-                console.error('Pull error:', error);
+                addFirebaseLog(`❌ Pull error: ${error.message}`, 'error');
                 updateFirebaseStatus('error', 'Pull Failed');
                 return false;
             });
+    }
+
+    function testFirebaseConnection() {
+        if (!firebaseDb) {
+            addFirebaseLog('❌ Firebase database not initialized', 'error');
+            return false;
+        }
+        
+        addFirebaseLog('🔍 Testing Firebase connection...', 'info');
+        updateFirebaseStatus('syncing', 'Testing...');
+        
+        return firebaseDb.ref('8068_pos_system_v8/_test_connection').set({
+            test: 'connection',
+            timestamp: new Date().toISOString(),
+            device: navigator.userAgent || 'unknown'
+        }).then(() => {
+            addFirebaseLog('✅ Test successful! Firebase is connected.', 'success');
+            updateFirebaseStatus('online', 'Connected');
+            return true;
+        }).catch((error) => {
+            addFirebaseLog(`❌ Test failed: ${error.message}`, 'error');
+            updateFirebaseStatus('error', 'Test Failed');
+            return false;
+        });
     }
 
     function setupFirebaseRealtimeListener() {
@@ -633,16 +720,17 @@
         firebaseListeners.forEach(ref => { try { ref.off(); } catch(e) {} });
         firebaseListeners = [];
 
+        addFirebaseLog('🔌 Setting up real-time listener...', 'info');
+
         // Listen for changes
         const ref = firebaseDb.ref('8068_pos_system_v8');
         ref.on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
-                // Only update if not currently syncing (to avoid loops)
                 if (!firebaseIsSyncing) {
-                    console.log('🔄 Real-time update received from Firebase');
+                    addFirebaseLog('🔄 Real-time update received from Firebase', 'info');
                     let hasChanges = false;
-                    const skipKeys = ['lastUpdated', 'version'];
+                    const skipKeys = ['lastUpdated', 'version', 'device', '_test_connection'];
                     Object.keys(data).forEach(key => {
                         if (skipKeys.includes(key)) return;
                         if (appData[key] !== undefined && data[key] !== null) {
@@ -662,16 +750,17 @@
                     });
                     if (hasChanges) {
                         saveToLocal();
+                        addFirebaseLog('✅ Data updated from real-time sync', 'success');
                         updateFirebaseStatus('online', 'Updated from cloud');
                         renderApp();
                     }
                 }
             }
         }, (error) => {
-            console.error('Firebase listener error:', error);
-            updateFirebaseStatus('error', 'Listener Error');
+            addFirebaseLog(`⚠️ Real-time listener error: ${error.message}`, 'warn');
         });
         firebaseListeners.push(ref);
+        addFirebaseLog('✅ Real-time listener active', 'success');
     }
 
     // ======================== COMMISSION MATRIX ========================
@@ -3436,6 +3525,7 @@
                 <div><label class="text-gray-400 text-sm">App ID</label><input type="text" id="fbAppId" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.appId || ''}" placeholder="1:123:web:abc"></div>
                 <div class="flex gap-3 mt-4">
                     <button onclick="saveFirebaseConfig()" class="btn-neon flex-1 p-2 rounded"><i class="fas fa-save"></i> Save & Connect</button>
+                    <button onclick="testFirebaseConfig()" class="bg-blue-600 flex-1 p-2 rounded"><i class="fas fa-vial"></i> Test Connection</button>
                     <button onclick="closeAdminModal()" class="bg-gray-700 flex-1 p-2 rounded">Cancel</button>
                 </div>
                 <div class="text-xs text-gray-500 mt-2">
@@ -3446,6 +3536,58 @@
             </div>
         </div></div>`;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
+    };
+
+    window.testFirebaseConfig = function() {
+        const config = {
+            apiKey: document.getElementById('fbApiKey')?.value?.trim() || '',
+            authDomain: document.getElementById('fbAuthDomain')?.value?.trim() || '',
+            databaseURL: document.getElementById('fbDbUrl')?.value?.trim() || '',
+            projectId: document.getElementById('fbProjectId')?.value?.trim() || '',
+            storageBucket: document.getElementById('fbStorageBucket')?.value?.trim() || '',
+            messagingSenderId: document.getElementById('fbMessagingSenderId')?.value?.trim() || '',
+            appId: document.getElementById('fbAppId')?.value?.trim() || ''
+        };
+
+        if (!config.apiKey || !config.databaseURL) {
+            alert("Please enter at least API Key and Database URL");
+            return;
+        }
+
+        addFirebaseLog('🔍 Testing connection with provided config...', 'info');
+        
+        try {
+            let testApp;
+            try {
+                testApp = firebase.initializeApp(config, 'testApp');
+            } catch(e) {
+                if (e.message.includes('already exists')) {
+                    testApp = firebase.app('testApp');
+                } else {
+                    throw e;
+                }
+            }
+            const testDb = firebase.database(testApp);
+            const testRef = testDb.ref('_test_connection');
+            
+            testRef.set({
+                test: 'connection',
+                timestamp: new Date().toISOString(),
+                device: navigator.userAgent || 'unknown'
+            }).then(() => {
+                addFirebaseLog('✅ Connection test successful!', 'success');
+                alert('✅ Firebase connection successful! Your credentials are valid.');
+                testDb.ref('_test_connection').remove();
+                try { firebase.app('testApp').delete(); } catch(e) {}
+            }).catch((error) => {
+                addFirebaseLog(`❌ Connection test failed: ${error.message}`, 'error');
+                alert(`❌ Connection failed: ${error.message}\n\nCheck your Database URL and Security Rules.`);
+                try { firebase.app('testApp').delete(); } catch(e) {}
+            });
+        } catch(e) {
+            addFirebaseLog(`❌ Test error: ${e.message}`, 'error');
+            alert(`❌ Error: ${e.message}`);
+        }
     };
 
     window.saveFirebaseConfig = function() {
@@ -3479,25 +3621,16 @@
                 firebaseListeners = [];
             }
 
-            if (initFirebase()) {
-                // Try to pull data from Firebase
-                pullFromFirebase().then(() => {
+            initFirebase().then((success) => {
+                if (success) {
                     setupFirebaseRealtimeListener();
                     closeAdminModal();
                     renderApp();
                     alert('✅ Firebase connected successfully! Data synced.');
-                }).catch(() => {
-                    // If pull fails, just set up listener and push current data
-                    setupFirebaseRealtimeListener();
-                    syncToFirebase().then(() => {
-                        closeAdminModal();
-                        renderApp();
-                        alert('✅ Firebase connected! Data uploaded to cloud.');
-                    });
-                });
-            } else {
-                alert('❌ Failed to initialize Firebase. Please check your configuration.');
-            }
+                } else {
+                    alert('❌ Failed to connect to Firebase. Check your configuration and try again.');
+                }
+            });
         } catch(e) {
             alert('❌ Firebase error: ' + e.message);
         }
@@ -4577,7 +4710,9 @@
                             <button onclick="showFirebaseConfig()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-cloud"></i> Configure Firebase</button>
                             ${firebaseInitialized ? `<span class="text-green-400 text-sm flex items-center"><i class="fas fa-check-circle mr-1"></i> Connected</span>` : `<span class="text-yellow-400 text-sm flex items-center"><i class="fas fa-exclamation-triangle mr-1"></i> Not Connected</span>`}
                             ${firebaseInitialized ? `<button onclick="syncToFirebase()" class="bg-blue-600 px-3 py-1 rounded text-sm"><i class="fas fa-cloud-upload-alt"></i> Sync Now</button>` : ''}
+                            ${firebaseInitialized ? `<button onclick="testFirebaseConnection()" class="bg-purple-600 px-3 py-1 rounded text-sm"><i class="fas fa-vial"></i> Test</button>` : ''}
                         </div>
+                        <div id="firebaseLogConsole" class="log-console mt-2" style="max-height:100px;"></div>
                     </div>
                 </div>
             </div>
@@ -4750,6 +4885,7 @@
         initFirebase();
     } else {
         updateFirebaseStatus('offline', 'Not Configured');
+        addFirebaseLog('ℹ️ Firebase not configured. Click "Configure Firebase" to set up.', 'info');
     }
 
     document.body.innerHTML = `
