@@ -477,20 +477,21 @@
     commissionMatrix: appData.commissionMatrix,
     lastUpdated: new Date().toISOString()
 };
-
 return firebaseDb.ref('8068_pos_system').set(dataToSync)
     .then(() => {
         updateSyncStatus('synced', 'All data synced');
-        localStorage.setItem('8068_last_sync', new Date().toISOString());
+        localStorage.setItem(
+            '8068_last_sync',
+            new Date().toISOString()
+        );
         return true;
     })
     .catch((error) => {
-        console.error('Sync error:', error);
-        updateSyncStatus('error', 'Sync failed');
+        console.error(error);
+        updateSyncStatus('error', error.message);
         return false;
     });
 }
-
     function pullFromFirebase() {
         if (!firebaseInitialized || !firebaseDb) {
             updateSyncStatus('error', 'Firebase not initialized');
