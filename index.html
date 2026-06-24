@@ -461,22 +461,9 @@
         updateSyncStatus('syncing', 'Uploading...');
 
         const dataToSync = {
-            services: appData.services,
-            categories: appData.categories,
-            customers: appData.customers,
-            transactions: appData.transactions,
-            openServices: appData.openServices,
-            staff: appData.staff,
-            expenses: appData.expenses,
-            credits: appData.credits,
-            inventory: appData.inventory,
-            systemSettings: appData.systemSettings,
-            users: appData.users,
-            currentUser: appData.currentUser,
-            nextIds: appData.nextIds,
-            commissionMatrix: appData.commissionMatrix,
-            lastUpdated: new Date().toISOString()
-        };
+    test: "Firebase Sync Test",
+    timestamp: new Date().toISOString()
+};
 
         return firebaseDb.ref('8068_pos_system').set(dataToSync)
             .then(() => {
