@@ -461,21 +461,9 @@
         updateSyncStatus('syncing', 'Uploading...');
 
         const dataToSync = {
-    test: "Firebase Sync Test",
-    timestamp: new Date().toISOString()
+   test: "firebase-working",
+   timestamp: new Date().toISOString()
 };
-
-        return firebaseDb.ref('8068_pos_system').set(dataToSync)
-            .then(() => {
-                updateSyncStatus('synced', 'All data synced');
-                localStorage.setItem('8068_last_sync', new Date().toISOString());
-                return true;
-            })
-            .catch((error) => {
-                console.error('Sync error:', error);
-                updateSyncStatus('error', 'Sync failed');
-                return false;
-            });
     }
 
     function pullFromFirebase() {
