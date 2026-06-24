@@ -461,8 +461,22 @@
         updateSyncStatus('syncing', 'Uploading...');
 
         const dataToSync = {
-   test: "firebase-working",
-   timestamp: new Date().toISOString()
+   services: appData.services,
+   categories: appData.categories,
+   customers: appData.customers,
+   transactions: appData.transactions,
+   openServices: appData.openServices,
+   staff: appData.staff,
+   expenses: appData.expenses,
+   credits: appData.credits,
+   inventory: appData.inventory,
+   systemSettings: appData.systemSettings,
+   users: appData.users,
+   currentUser: appData.currentUser,
+   nextIds: appData.nextIds,
+   commissionMatrix: appData.commissionMatrix,
+   lastUpdated: new Date().toISOString()
+};
 };
     }
 
