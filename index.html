@@ -428,6 +428,39 @@
     let isFirebasePrimary = false;
     let dataLoaded = false;
 
+    // ======================== DATA SANITIZATION ========================
+    function sanitizeDataForFirebase(data) {
+        // Deep clone to avoid modifying original
+        const sanitized = JSON.parse(JSON.stringify(data));
+        
+        // Recursively remove undefined values and replace with null or empty
+        function cleanObject(obj) {
+            if (obj === undefined) return null;
+            if (obj === null) return null;
+            if (typeof obj !== 'object') return obj;
+            
+            if (Array.isArray(obj)) {
+                return obj.map(item => cleanObject(item));
+            }
+            
+            const cleaned = {};
+            for (const key in obj) {
+                if (obj[key] === undefined) {
+                    cleaned[key] = null;
+                } else if (obj[key] === null) {
+                    cleaned[key] = null;
+                } else if (typeof obj[key] === 'object') {
+                    cleaned[key] = cleanObject(obj[key]);
+                } else {
+                    cleaned[key] = obj[key];
+                }
+            }
+            return cleaned;
+        }
+        
+        return cleanObject(sanitized);
+    }
+
     function addFirebaseLog(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
         firebaseLogs.push({ message, type, timestamp });
@@ -478,13 +511,11 @@
                     firebaseInitialized = true;
                     isFirebasePrimary = true;
                     setupFirebaseRealtimeListener();
-                    // Load data from Firebase
                     loadAllDataFromFirebase();
                 } else {
                     addFirebaseLog('⚠️ Firebase connection lost - switching to offline mode', 'warn');
                     updateFirebaseStatus('offline', 'Disconnected');
                     isFirebasePrimary = false;
-                    // If we have local data, use it
                     if (!dataLoaded && localStorage.getItem("8068_enterprise_v8")) {
                         loadLocalData();
                     }
@@ -552,7 +583,6 @@
                 statusEl.innerHTML = `<span class="dot"></span><span class="status-text">${message || 'Offline'}</span>`;
             }
         }
-        // Update sync status in header
         const syncEl = document.getElementById('syncStatus');
         if (syncEl) {
             syncEl.className = 'sync-status';
@@ -633,7 +663,6 @@
                             }
                         }
                     });
-                    // Handle users separately - preserve passwords
                     if (data.users) {
                         data.users.forEach(remoteUser => {
                             const localUser = appData.users.find(u => u.id === remoteUser.id);
@@ -700,7 +729,8 @@
         updateFirebaseStatus('syncing', 'Uploading...');
         addFirebaseLog('🔄 Starting sync to Firebase...', 'info');
 
-        const dataToSync = {
+        // Prepare data with sanitization to remove undefined values
+        const rawData = {
             services: appData.services || [],
             categories: appData.categories || [],
             customers: appData.customers || [],
@@ -719,6 +749,9 @@
             version: '8.6'
         };
 
+        // Sanitize data to remove undefined values
+        const dataToSync = sanitizeDataForFirebase(rawData);
+        
         const dataSize = JSON.stringify(dataToSync).length;
         addFirebaseLog(`📦 Syncing ${Object.keys(dataToSync).length} collections (${Math.round(dataSize/1024)} KB)`, 'info');
 
@@ -761,7 +794,7 @@
         addFirebaseLog('📤 Pushing data to Firebase...', 'info');
         updateFirebaseStatus('syncing', 'Pushing...');
 
-        const dataToSync = {
+        const rawData = {
             services: appData.services || [],
             categories: appData.categories || [],
             customers: appData.customers || [],
@@ -779,6 +812,8 @@
             lastUpdated: new Date().toISOString(),
             version: '8.6'
         };
+
+        const dataToSync = sanitizeDataForFirebase(rawData);
 
         return firebaseDb.ref('8068_pos_system_v8').update(dataToSync)
             .then(() => {
@@ -964,7 +999,6 @@
         return "Specialty";
     }
 
-    // Try to load local data first as fallback
     const saved = localStorage.getItem("8068_enterprise_v8");
     if (saved) {
         try {
@@ -996,7 +1030,6 @@
     function saveToLocal() {
         localStorage.setItem("8068_enterprise_v8", JSON.stringify(appData));
         localStorage.setItem("8068_system_last_saved_v8", new Date().toISOString());
-        // Auto-sync to Firebase after save if connected
         if (firebaseInitialized && isFirebasePrimary && !firebaseIsSyncing) {
             setTimeout(() => pushToFirebase(), 300);
         }
@@ -3233,7 +3266,7 @@
             id: generateReceiptNo(), 
             date: new Date().toISOString(), 
             customer: selectedCustomer ? selectedCustomer.name : "Walk-in Customer", 
-            customerId: selectedCustomer?.id, 
+            customerId: selectedCustomer?.id || null,
             vehicle: vehicleInfo.model || "N/A", 
             plate: vehicleInfo.plate || "N/A", 
             items: posCart.map(i => ({ ...i })), 
@@ -3614,6 +3647,7 @@
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
                     <p class="text-green-400 mt-1">✅ v8.6: Firebase as primary storage with localStorage fallback</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data are synchronized in real-time</p>
+                    <p class="text-green-400 mt-1">🔧 Data sanitization removes undefined values before syncing</p>
                 </div>
             </div>
         </div></div>`;
@@ -3691,9 +3725,7 @@
         firebaseConfig = config;
         localStorage.setItem("8068_firebase_config_v8", JSON.stringify(config));
 
-        // Re-initialize Firebase
         try {
-            // Clean up old app if exists
             if (firebaseApp) {
                 try { firebaseApp.delete(); } catch(e) {}
                 firebaseApp = null;
@@ -4816,6 +4848,7 @@
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
                 <div class="mt-1 text-cyan-400">📅 Auto-Commission on Service Complete | Real-time Sync</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🔥 Firebase: Connected (Primary) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🔥 Firebase: Disconnected - Using localStorage fallback</div>`}
+                <div class="mt-1 text-green-400">🔧 Data sanitization removes undefined values before syncing</div>
             </div>
         </div>`;
     }
@@ -5041,6 +5074,7 @@
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
     console.log(`%c🔥 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Primary)' : 'Disconnected (Using localStorage)'}`, 'color: #ffaa00;');
     console.log('%c🔄 v8.6: Firebase as primary storage with localStorage fallback', 'color: #00d4ff;');
+    console.log('%c🔧 Data sanitization removes undefined values before syncing to Firebase', 'color: #00d4ff;');
     if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect to Firebase', 'color: #ff6b6b;');
     } else {
