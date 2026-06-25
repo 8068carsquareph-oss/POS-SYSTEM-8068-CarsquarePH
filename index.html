@@ -99,6 +99,8 @@
         .pagination-btn.active { background: #00d4ff; color: black; border-color: #00d4ff; }
         .receipt-settings { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 12px; }
         .receipt-settings select { background: #0a0a0a; border: 1px solid #444; border-radius: 4px; color: white; padding: 4px 8px; }
+        
+        /* ===== COMPACT HEADER STYLES ===== */
         .main-header {
             background: #0a0a0a;
             border-bottom: 1px solid rgba(0, 212, 255, 0.2);
@@ -224,6 +226,7 @@
         .header-user .sync-status .sync-count { font-size: 8px; background: rgba(0,212,255,0.2); padding: 0 6px; border-radius: 8px; margin-left: 2px; }
         @keyframes pulse-sync { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
+        /* Mobile nav toggle */
         .mobile-nav-toggle {
             display: none;
             background: transparent;
@@ -345,6 +348,7 @@
         }
         @media (max-width: 768px) { .admin-grid { grid-template-columns: 1fr; } .admin-sidebar { border-radius: 1rem; } }
         
+        /* Real-time update pulse animation */
         .sync-pulse {
             animation: pulse-green 1.5s ease-in-out;
         }
@@ -388,11 +392,6 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .firebase-primary-badge { background: rgba(0, 255, 136, 0.1); color: #00ff88; border: 1px solid rgba(0, 255, 136, 0.2); padding: 2px 10px; border-radius: 12px; font-size: 10px; display: inline-flex; align-items: center; gap: 4px; }
         .firebase-primary-badge i { font-size: 10px; }
-        
-        .commission-summary-card { background: rgba(0, 212, 255, 0.05); border: 1px solid rgba(0, 212, 255, 0.15); border-radius: 8px; padding: 12px; }
-        .commission-period-btn { padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.2s; }
-        .commission-period-btn.active { background: #00d4ff; color: black; }
-        .commission-period-btn:hover { background: #00d4ff33; }
     </style>
 </head>
 <body class="text-white">
@@ -434,6 +433,7 @@
     let syncTimer = null;
     let isInitialLoad = true;
 
+    // ======================== DATA SANITIZATION ========================
     function sanitizeDataForFirebase(data) {
         if (data === undefined) return null;
         if (data === null) return null;
@@ -476,6 +476,7 @@
         }
     }
 
+    // ======================== OPTIMIZED FIREBASE INIT ========================
     function initFirebase() {
         addFirebaseLog('Initializing Firebase as primary storage...', 'info');
         
@@ -524,6 +525,7 @@
                     }
                 });
 
+                // Check initial connection
                 connRef.once('value', (snap) => {
                     if (snap.val() === true) {
                         firebaseInitialized = true;
@@ -537,6 +539,7 @@
                         }
                         resolve(true);
                     } else {
+                        // Wait for connection or fallback
                         setTimeout(() => {
                             connRef.once('value', (snap2) => {
                                 if (snap2.val() === true) {
@@ -602,6 +605,7 @@
         }
     }
 
+    // ======================== OPTIMIZED DATA LOADING ========================
     function loadLocalData() {
         const saved = localStorage.getItem("8068_enterprise_v8");
         if (saved) {
@@ -614,7 +618,6 @@
                 if (!appData.openServices) appData.openServices = [];
                 if (!appData.inventory) appData.inventory = [];
                 if (!appData.credits) appData.credits = [];
-                if (!appData.commissionReports) appData.commissionReports = [];
                 if (!appData.users) appData.users = [
                     { id: 1, username: "owner", password: "owner123", role: "Owner", name: "Owner", isActive: true },
                     { id: 2, username: "manager", password: "manager123", role: "Manager", name: "Manager", isActive: true },
@@ -714,6 +717,7 @@
             });
     }
 
+    // ======================== OPTIMIZED FIREBASE SYNC ========================
     function syncToFirebase(force = false) {
         if (!firebaseInitialized || !firebaseDb) {
             addFirebaseLog('❌ Cannot sync: Firebase not ready', 'error');
@@ -743,7 +747,6 @@
             currentUser: appData.currentUser || null,
             nextIds: appData.nextIds || {},
             commissionMatrix: appData.commissionMatrix || {},
-            commissionReports: appData.commissionReports || [],
             lastUpdated: new Date().toISOString(),
             version: '8.7'
         };
@@ -786,6 +789,7 @@
             });
     }
 
+    // ======================== OPTIMIZED DEBOUNCED SYNC ========================
     function debouncedSync() {
         if (syncTimer) {
             clearTimeout(syncTimer);
@@ -931,8 +935,7 @@
         ],
         currentUser: null,
         nextIds: { transaction: 100, customer: 50, expense: 20, service: 50, openService: 1, credit: 1 },
-        commissionMatrix: initializeCommissionMatrix(),
-        commissionReports: []
+        commissionMatrix: initializeCommissionMatrix()
     };
 
     function getDescription(name) {
@@ -974,7 +977,6 @@
             if (!appData.openServices) appData.openServices = [];
             if (!appData.inventory) appData.inventory = [];
             if (!appData.credits) appData.credits = [];
-            if (!appData.commissionReports) appData.commissionReports = [];
             if (!appData.users) appData.users = [
                 { id: 1, username: "owner", password: "owner123", role: "Owner", name: "Owner", isActive: true },
                 { id: 2, username: "manager", password: "manager123", role: "Manager", name: "Manager", isActive: true },
@@ -995,6 +997,7 @@
     function saveToLocal() {
         localStorage.setItem("8068_enterprise_v8", JSON.stringify(appData));
         localStorage.setItem("8068_system_last_saved_v8", new Date().toISOString());
+        // Debounced sync to Firebase
         if (firebaseInitialized && isFirebasePrimary) {
             debouncedSync();
         }
@@ -1031,7 +1034,6 @@
     let dateRangeStart = '';
     let dateRangeEnd = '';
     let mobileNavOpen = false;
-    let commissionPeriod = 'weekly';
 
     function generateReceiptNo() { return "INV-" + new Date().getFullYear() + "-" + (appData.nextIds.transaction++); }
 
@@ -1046,17 +1048,12 @@
             s.weekPart2Total = 0;
             s.monthlyCommission = 0;
             s.dailyCommission = 0;
-            s.monthlyBreakdown = {};
-            s.yearlyBreakdown = {};
         });
 
         appData.transactions.forEach(t => {
             if (t.staffCommissions) {
                 const txDate = new Date(t.date);
                 const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
-                const monthKey = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
-                const yearKey = `${txDate.getFullYear()}`;
-                
                 Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
                     const staff = appData.staff.find(s => s.id === parseInt(staffId));
                     if (staff) {
@@ -1069,12 +1066,6 @@
                         }
                         staff.monthlyCommission = (staff.monthlyCommission || 0) + commission;
                         staff.dailyCommission = (staff.dailyCommission || 0) + commission;
-                        
-                        if (!staff.monthlyBreakdown) staff.monthlyBreakdown = {};
-                        staff.monthlyBreakdown[monthKey] = (staff.monthlyBreakdown[monthKey] || 0) + commission;
-                        
-                        if (!staff.yearlyBreakdown) staff.yearlyBreakdown = {};
-                        staff.yearlyBreakdown[yearKey] = (staff.yearlyBreakdown[yearKey] || 0) + commission;
                     }
                 });
             }
@@ -1088,101 +1079,6 @@
         });
 
         saveToLocal();
-    }
-
-    // ======================== GENERATE COMMISSION REPORTS ========================
-    function generateCommissionReport(period) {
-        recalculateStaffCommissions();
-        const now = new Date();
-        let reportData = [];
-        let periodLabel = '';
-
-        if (period === 'weekly') {
-            const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay());
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekStart.getDate() + 6);
-            periodLabel = `${weekStart.toISOString().slice(0,10)} to ${weekEnd.toISOString().slice(0,10)}`;
-            
-            appData.staff.forEach(s => {
-                const total = Object.values(s.weeklyBreakdown || {}).reduce((sum, val) => sum + val, 0);
-                reportData.push({
-                    staffId: s.id,
-                    name: s.name,
-                    position: s.position,
-                    tier: s.commissionTier,
-                    jobs: s.jobsCompleted || 0,
-                    sales: s.salesGenerated || 0,
-                    sunday: s.weeklyBreakdown?.Sunday || 0,
-                    monday: s.weeklyBreakdown?.Monday || 0,
-                    tuesday: s.weeklyBreakdown?.Tuesday || 0,
-                    wednesday: s.weeklyBreakdown?.Wednesday || 0,
-                    thursday: s.weeklyBreakdown?.Thursday || 0,
-                    friday: s.weeklyBreakdown?.Friday || 0,
-                    saturday: s.weeklyBreakdown?.Saturday || 0,
-                    total: total,
-                    period: periodLabel,
-                    periodType: 'weekly'
-                });
-            });
-        } else if (period === 'monthly') {
-            const month = now.getMonth();
-            const year = now.getFullYear();
-            const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-            periodLabel = `${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
-            
-            appData.staff.forEach(s => {
-                const total = s.monthlyBreakdown?.[monthKey] || 0;
-                reportData.push({
-                    staffId: s.id,
-                    name: s.name,
-                    position: s.position,
-                    tier: s.commissionTier,
-                    jobs: s.jobsCompleted || 0,
-                    sales: s.salesGenerated || 0,
-                    total: total,
-                    period: periodLabel,
-                    periodType: 'monthly',
-                    monthKey: monthKey
-                });
-            });
-        } else if (period === 'yearly') {
-            const year = now.getFullYear();
-            const yearKey = `${year}`;
-            periodLabel = `${year}`;
-            
-            appData.staff.forEach(s => {
-                const total = s.yearlyBreakdown?.[yearKey] || 0;
-                reportData.push({
-                    staffId: s.id,
-                    name: s.name,
-                    position: s.position,
-                    tier: s.commissionTier,
-                    jobs: s.jobsCompleted || 0,
-                    sales: s.salesGenerated || 0,
-                    total: total,
-                    period: periodLabel,
-                    periodType: 'yearly',
-                    yearKey: yearKey
-                });
-            });
-        }
-
-        // Save report to Firebase
-        const report = {
-            id: `COMM-${Date.now()}`,
-            period: period,
-            periodLabel: periodLabel,
-            generatedAt: new Date().toISOString(),
-            data: reportData,
-            totalCommission: reportData.reduce((sum, r) => sum + r.total, 0),
-            totalJobs: reportData.reduce((sum, r) => sum + r.jobs, 0),
-            totalSales: reportData.reduce((sum, r) => sum + r.sales, 0)
-        };
-
-        appData.commissionReports.push(report);
-        saveToLocal();
-        return report;
     }
 
     // ======================== EXPORT FUNCTIONS ========================
@@ -1466,8 +1362,8 @@
     };
 
     window.exportIncome = function() {
-        const totalSales = appData.transactions.reduce((s,t) => s + t.total, 0);
-        const totalExpenses = appData.expenses.reduce((s,e) => s + e.amount, 0);
+        const totalSales = appData.transactions.reduce((s,t)=>s+t.total, 0);
+        const totalExpenses = appData.expenses.reduce((s,e)=>s+e.amount, 0);
         const totalCommission = appData.staff.reduce((s, st) => s + (st.totalCommission || 0), 0);
         const data = [
             { metric: 'Total Sales', amount: `₱${totalSales.toFixed(2)}` },
@@ -1509,29 +1405,6 @@
         generateExcel(data, columns, 'Dashboard Summary', 'dashboard_summary');
         generatePDF(data, columns, 'Dashboard Summary Report', 'dashboard_summary', appData.systemSettings.companyLogo);
         generateCSV(data, columns, 'dashboard_summary');
-    };
-
-    window.exportCommissionReportPeriod = function(period) {
-        const report = generateCommissionReport(period);
-        const columns = [
-            { key: 'name', header: 'Staff Name' },
-            { key: 'position', header: 'Position' },
-            { key: 'tier', header: 'Tier' },
-            { key: 'jobs', header: 'Jobs' },
-            { key: 'sales', header: 'Sales' },
-            { key: 'total', header: 'Commission' }
-        ];
-        const data = report.data.map(r => ({
-            name: r.name,
-            position: r.position,
-            tier: `${r.tier}%`,
-            jobs: r.jobs,
-            sales: `₱${r.sales.toFixed(2)}`,
-            total: `₱${r.total.toFixed(2)}`
-        }));
-        generateExcel(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission`, `${period}_commission`);
-        generatePDF(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission Report`, `${period}_commission`, appData.systemSettings.companyLogo);
-        generateCSV(data, columns, `${period}_commission`);
     };
 
     // ======================== RECEIPT PRINTING ========================
@@ -1652,7 +1525,7 @@
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
                     <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7</p>
-                    <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> Enhanced Commission Reports</p>
+                    <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-database"></i> ${firebaseInitialized && isFirebasePrimary ? 'Firebase Primary' : 'Offline Mode'}</p>
                 </div>
                 <div class="space-y-4">
@@ -2267,58 +2140,235 @@
         generateCSV(data, columns, `transactions_${transactionFilter}`);
     };
 
-    // ======================== ENHANCED COMMISSION REPORTS ========================
-    function renderCommissionReports() {
+    // ======================== WEEKLY COMMISSION REPORT ========================
+    function renderWeeklyCommissionReport() {
         if(showLogin) return renderLogin();
         recalculateStaffCommissions();
 
         const now = new Date();
-        const report = generateCommissionReport(commissionPeriod);
-        const totalCommission = report.totalCommission || 0;
-        const totalJobs = report.totalJobs || 0;
-        const totalSales = report.totalSales || 0;
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - now.getDay());
+        const weekStartStr = currentWeekStart.toISOString().slice(0,10);
+        const weekEnd = new Date(currentWeekStart);
+        weekEnd.setDate(currentWeekStart.getDate() + 6);
+        const weekEndStr = weekEnd.toISOString().slice(0,10);
+
+        const weekTx = appData.transactions.filter(t => t.date >= weekStartStr && t.date <= weekEndStr);
+        
+        const weekStaffMap = {};
+        appData.staff.forEach(s => {
+            weekStaffMap[s.id] = {
+                name: s.name,
+                position: s.position,
+                tier: s.commissionTier,
+                jobs: 0,
+                sales: 0,
+                sunday: 0, monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0, saturday: 0,
+                total: 0,
+                part1: 0,
+                part2: 0
+            };
+        });
+
+        weekTx.forEach(t => {
+            if (t.staffCommissions) {
+                const txDate = new Date(t.date);
+                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const staffIdNum = parseInt(staffId);
+                    if (weekStaffMap[staffIdNum]) {
+                        const comm = data.commission || 0;
+                        weekStaffMap[staffIdNum].jobs += (data.jobs || 1);
+                        weekStaffMap[staffIdNum].sales += (t.total || 0);
+                        weekStaffMap[staffIdNum].total += comm;
+                        weekStaffMap[staffIdNum][dayName.toLowerCase()] = (weekStaffMap[staffIdNum][dayName.toLowerCase()] || 0) + comm;
+                    }
+                });
+            }
+        });
+
+        Object.values(weekStaffMap).forEach(s => {
+            s.part1 = (s.sunday || 0) + (s.monday || 0) + (s.tuesday || 0);
+            s.part2 = (s.wednesday || 0) + (s.thursday || 0) + (s.friday || 0) + (s.saturday || 0);
+        });
 
         let tableRows = '';
-        report.data.forEach((r, idx) => {
+        let grandTotal = 0;
+        let grandJobs = 0;
+        let grandSales = 0;
+        let grandSunday = 0, grandMonday = 0, grandTuesday = 0, grandWednesday = 0, grandThursday = 0, grandFriday = 0, grandSaturday = 0;
+        let grandPart1 = 0, grandPart2 = 0;
+        
+        Object.values(weekStaffMap).forEach(s => {
+            grandTotal += s.total;
+            grandJobs += s.jobs;
+            grandSales += s.sales;
+            grandSunday += (s.sunday || 0);
+            grandMonday += (s.monday || 0);
+            grandTuesday += (s.tuesday || 0);
+            grandWednesday += (s.wednesday || 0);
+            grandThursday += (s.thursday || 0);
+            grandFriday += (s.friday || 0);
+            grandSaturday += (s.saturday || 0);
+            grandPart1 += s.part1;
+            grandPart2 += s.part2;
+            
             tableRows += `<tr class="border-b border-gray-700 hover:bg-gray-800 transition">
-                <td class="py-2 text-center">${idx + 1}</td>
-                <td class="py-2 font-semibold">${r.name}</td>
-                <td class="text-center">${r.position}</td>
-                <td class="text-center"><span class="commission-badge">${r.tier}%</span></td>
-                <td class="text-center">${r.jobs}</td>
-                <td class="text-right text-cyan-300">₱${r.sales.toFixed(2)}</td>
-                <td class="text-right text-green-400 font-bold">₱${r.total.toFixed(2)}</td>
+                <td class="py-2 font-semibold text-left">${s.name}</td>
+                <td class="text-center">${s.position}</td>
+                <td class="text-center"><span class="commission-badge">${s.tier}%</span></td>
+                <td class="text-center">${s.jobs}</td>
+                <td class="text-center text-cyan-300">₱${(s.sunday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.monday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.tuesday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.wednesday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.thursday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.friday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.saturday||0).toFixed(2)}</td>
+                <td class="text-center text-yellow-400 font-bold">₱${s.part1.toFixed(2)}</td>
+                <td class="text-center text-yellow-400 font-bold">₱${s.part2.toFixed(2)}</td>
+                <td class="text-center text-green-400 font-bold">₱${s.total.toFixed(2)}</td>
             </tr>`;
         });
 
         return `<div class="card-premium p-6">
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+            <div class="flex justify-between items-center mb-4">
                 <div>
-                    <h2 class="text-2xl font-bold"><i class="fas fa-chart-pie"></i> Commission Reports</h2>
-                    <p class="text-sm text-gray-400">${report.periodLabel} | ${report.data.length} staff</p>
-                    <div class="flex gap-4 mt-1 text-xs">
-                        <span class="text-green-400">Total Commission: ₱${totalCommission.toFixed(2)}</span>
-                        <span class="text-cyan-400">Total Jobs: ${totalJobs}</span>
-                        <span class="text-yellow-400">Total Sales: ₱${totalSales.toFixed(2)}</span>
-                    </div>
-                    ${isFirebasePrimary ? `<span class="firebase-primary-badge"><i class="fas fa-database"></i> Report Saved to Firebase</span>` : ''}
+                    <h3 class="text-2xl font-bold"><i class="fas fa-calendar-week"></i> Weekly Commission Report</h3>
+                    <p class="text-sm text-gray-400">${weekStartStr} to ${weekEndStr}</p>
+                    <p class="text-xs text-green-400"><i class="fas fa-sync"></i> Auto-calculated from all transactions</p>
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-database"></i> Firebase Primary</p>` : ''}
                 </div>
                 <div class="flex gap-2 flex-wrap">
-                    <button onclick="setCommissionPeriod('weekly')" class="commission-period-btn ${commissionPeriod === 'weekly' ? 'active' : 'bg-gray-700'} px-3 py-1 rounded text-sm">Weekly</button>
-                    <button onclick="setCommissionPeriod('monthly')" class="commission-period-btn ${commissionPeriod === 'monthly' ? 'active' : 'bg-gray-700'} px-3 py-1 rounded text-sm">Monthly</button>
-                    <button onclick="setCommissionPeriod('yearly')" class="commission-period-btn ${commissionPeriod === 'yearly' ? 'active' : 'bg-gray-700'} px-3 py-1 rounded text-sm">Yearly</button>
-                    <button onclick="exportCommissionReportPeriod('${commissionPeriod}')" class="excel-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
-                    <button onclick="exportCommissionReportPeriodPDF('${commissionPeriod}')" class="pdf-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
-                    <button onclick="exportCommissionReportPeriodCSV('${commissionPeriod}')" class="csv-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
-                    <button onclick="printCommissionReportPeriod()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                    <button onclick="exportWeeklyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
+                    <button onclick="exportWeeklyCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
+                    <button onclick="exportWeeklyCommissionCSV()" class="csv-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
+                    <button onclick="printWeeklyCommission()" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                    ${firebaseInitialized ? `<button onclick="syncToFirebase()" class="bg-blue-600 px-4 py-2 rounded text-sm"><i class="fas fa-cloud-upload-alt"></i> Save to Cloud</button>` : ''}
                 </div>
             </div>
             <div class="overflow-x-auto max-h-96 overflow-y-auto">
-                <table class="w-full text-sm">
-                    <thead class="sticky top-0 bg-gray-900 border-b-2 border-cyan-400">
+                <table class="w-full text-sm commission-report-grid">
+                    <thead>
                         <tr>
-                            <th class="text-center py-2">#</th>
-                            <th class="text-left py-2">Staff Name</th>
+                            <th class="text-left">Staff</th>
+                            <th>Position</th>
+                            <th>Tier</th>
+                            <th>Jobs Count</th>
+                            <th>Sunday</th>
+                            <th>Monday</th>
+                            <th>Tuesday</th>
+                            <th>Wednesday</th>
+                            <th>Thursday</th>
+                            <th>Friday</th>
+                            <th>Saturday</th>
+                            <th class="text-yellow-400">Sun-Tue</th>
+                            <th class="text-yellow-400">Wed-Sat</th>
+                            <th class="text-green-400">Grand Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows || '<tr><td colspan="14" class="text-center py-4 text-gray-400">No data for this week</td></tr>'}
+                        ${Object.values(weekStaffMap).length > 0 ? `
+                        <tr class="grand-total-row">
+                            <td colspan="3" class="text-right font-bold text-cyan-400">GRAND TOTALS:</td>
+                            <td class="font-bold">${grandJobs}</td>
+                            <td class="font-bold text-cyan-300">₱${grandSunday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandMonday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandTuesday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandWednesday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandThursday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandFriday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandSaturday.toFixed(2)}</td>
+                            <td class="font-bold text-yellow-400">₱${grandPart1.toFixed(2)}</td>
+                            <td class="font-bold text-yellow-400">₱${grandPart2.toFixed(2)}</td>
+                            <td class="font-bold text-green-400">₱${grandTotal.toFixed(2)}</td>
+                        </tr>
+                        ` : ''}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    // ======================== MONTHLY COMMISSION REPORT ========================
+    function renderMonthlyCommissionReport() {
+        if(showLogin) return renderLogin();
+        recalculateStaffCommissions();
+
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        const monthName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+        const monthTx = appData.transactions.filter(t => {
+            const d = new Date(t.date);
+            return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+        });
+
+        const monthStaffMap = {};
+        appData.staff.forEach(s => {
+            monthStaffMap[s.id] = {
+                name: s.name,
+                position: s.position,
+                tier: s.commissionTier,
+                jobs: 0,
+                sales: 0,
+                commission: 0
+            };
+        });
+
+        monthTx.forEach(t => {
+            if (t.staffCommissions) {
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const staffIdNum = parseInt(staffId);
+                    if (monthStaffMap[staffIdNum]) {
+                        monthStaffMap[staffIdNum].jobs += (data.jobs || 1);
+                        monthStaffMap[staffIdNum].sales += (t.total || 0);
+                        monthStaffMap[staffIdNum].commission += (data.commission || 0);
+                    }
+                });
+            }
+        });
+
+        let tableRows = '';
+        let grandTotal = 0;
+        let grandJobs = 0;
+        let grandSales = 0;
+        Object.values(monthStaffMap).forEach(s => {
+            grandTotal += s.commission;
+            grandJobs += s.jobs;
+            grandSales += s.sales;
+            tableRows += `<tr class="border-b border-gray-700">
+                <td class="py-2 font-semibold">${s.name}</td>
+                <td class="text-center">${s.position}</td>
+                <td class="text-center"><span class="commission-badge">${s.tier}%</span></td>
+                <td class="text-center">${s.jobs}</td>
+                <td class="text-right">₱${s.sales.toFixed(2)}</td>
+                <td class="text-right text-green-400 font-bold">₱${s.commission.toFixed(2)}</td>
+            </tr>`;
+        });
+
+        return `<div class="card-premium p-6">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-2xl font-bold"><i class="fas fa-calendar-alt"></i> Monthly Commission Report</h3>
+                    <p class="text-sm text-gray-400">${monthName}</p>
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-database"></i> Firebase Primary</p>` : ''}
+                </div>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="exportMonthlyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
+                    <button onclick="exportMonthlyCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
+                    <button onclick="exportMonthlyCommissionCSV()" class="csv-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
+                    <button onclick="printMonthlyCommission()" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                    ${firebaseInitialized ? `<button onclick="syncToFirebase()" class="bg-blue-600 px-4 py-2 rounded text-sm"><i class="fas fa-cloud-upload-alt"></i> Save to Cloud</button>` : ''}
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="border-b-2 border-cyan-400">
+                        <tr>
+                            <th class="text-left py-2">Staff</th>
                             <th class="text-center py-2">Position</th>
                             <th class="text-center py-2">Tier</th>
                             <th class="text-center py-2">Jobs</th>
@@ -2327,14 +2377,14 @@
                         </tr>
                     </thead>
                     <tbody>
-                        ${tableRows || '<tr><td colspan="7" class="text-center py-8 text-gray-400">No commission data for this period</td></tr>'}
+                        ${tableRows || '<tr><td colspan="6" class="text-center py-4 text-gray-400">No data for this month</td></tr>'}
                     </tbody>
-                    <tfoot class="sticky bottom-0 bg-gray-900 border-t-2 border-cyan-400 font-bold">
+                    <tfoot class="border-t-2 border-cyan-400 font-bold">
                         <tr>
-                            <td colspan="4" class="py-2 text-right">TOTALS:</td>
-                            <td class="text-center">${totalJobs}</td>
-                            <td class="text-right text-yellow-400">₱${totalSales.toFixed(2)}</td>
-                            <td class="text-right text-green-400">₱${totalCommission.toFixed(2)}</td>
+                            <td colspan="3" class="py-2 text-right">TOTALS:</td>
+                            <td class="text-center">${grandJobs}</td>
+                            <td class="text-right">₱${grandSales.toFixed(2)}</td>
+                            <td class="text-right text-green-400">₱${grandTotal.toFixed(2)}</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -2342,59 +2392,375 @@
         </div>`;
     }
 
-    window.setCommissionPeriod = (period) => {
-        commissionPeriod = period;
-        renderApp();
-    };
+    // ======================== YEARLY COMMISSION REPORT ========================
+    function renderYearlyCommissionReport() {
+        if(showLogin) return renderLogin();
+        recalculateStaffCommissions();
 
-    window.exportCommissionReportPeriodPDF = function(period) {
-        const report = generateCommissionReport(period);
+        const now = new Date();
+        const currentYear = now.getFullYear();
+
+        const yearTx = appData.transactions.filter(t => {
+            const d = new Date(t.date);
+            return d.getFullYear() === currentYear;
+        });
+
+        const yearStaffMap = {};
+        appData.staff.forEach(s => {
+            yearStaffMap[s.id] = {
+                name: s.name,
+                position: s.position,
+                tier: s.commissionTier,
+                jobs: 0,
+                sales: 0,
+                commission: 0,
+                monthly: {}
+            };
+            for (let m = 0; m < 12; m++) {
+                yearStaffMap[s.id].monthly[m] = 0;
+            }
+        });
+
+        yearTx.forEach(t => {
+            if (t.staffCommissions) {
+                const d = new Date(t.date);
+                const month = d.getMonth();
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const staffIdNum = parseInt(staffId);
+                    if (yearStaffMap[staffIdNum]) {
+                        const comm = data.commission || 0;
+                        yearStaffMap[staffIdNum].jobs += (data.jobs || 1);
+                        yearStaffMap[staffIdNum].sales += (t.total || 0);
+                        yearStaffMap[staffIdNum].commission += comm;
+                        yearStaffMap[staffIdNum].monthly[month] = (yearStaffMap[staffIdNum].monthly[month] || 0) + comm;
+                    }
+                });
+            }
+        });
+
+        const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        let tableRows = '';
+        let grandTotal = 0;
+        let grandJobs = 0;
+        let grandSales = 0;
+        let grandMonthly = Array(12).fill(0);
+        
+        Object.values(yearStaffMap).forEach(s => {
+            grandTotal += s.commission;
+            grandJobs += s.jobs;
+            grandSales += s.sales;
+            for (let m = 0; m < 12; m++) {
+                grandMonthly[m] += s.monthly[m] || 0;
+            }
+            tableRows += `<tr class="border-b border-gray-700">
+                <td class="py-2 font-semibold">${s.name}</td>
+                <td class="text-center">${s.position}</td>
+                <td class="text-center"><span class="commission-badge">${s.tier}%</span></td>
+                <td class="text-center">${s.jobs}</td>
+                ${monthLabels.map((_, m) => `<td class="text-right text-cyan-300">₱${(s.monthly[m] || 0).toFixed(2)}</td>`).join('')}
+                <td class="text-right text-green-400 font-bold">₱${s.commission.toFixed(2)}</td>
+            </tr>`;
+        });
+
+        return `<div class="card-premium p-6">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-2xl font-bold"><i class="fas fa-calendar-check"></i> Yearly Commission Report</h3>
+                    <p class="text-sm text-gray-400">${currentYear}</p>
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-database"></i> Firebase Primary</p>` : ''}
+                </div>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="exportYearlyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
+                    <button onclick="exportYearlyCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
+                    <button onclick="exportYearlyCommissionCSV()" class="csv-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
+                    <button onclick="printYearlyCommission()" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                    ${firebaseInitialized ? `<button onclick="syncToFirebase()" class="bg-blue-600 px-4 py-2 rounded text-sm"><i class="fas fa-cloud-upload-alt"></i> Save to Cloud</button>` : ''}
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="border-b-2 border-cyan-400">
+                        <tr>
+                            <th class="text-left py-2">Staff</th>
+                            <th class="text-center py-2">Position</th>
+                            <th class="text-center py-2">Tier</th>
+                            <th class="text-center py-2">Jobs</th>
+                            ${monthLabels.map(m => `<th class="text-center py-2 text-xs">${m}</th>`).join('')}
+                            <th class="text-right py-2 text-green-400">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows || '<tr><td colspan="16" class="text-center py-4 text-gray-400">No data for this year</td></tr>'}
+                    </tbody>
+                    <tfoot class="border-t-2 border-cyan-400 font-bold">
+                        <tr>
+                            <td colspan="3" class="py-2 text-right">TOTALS:</td>
+                            <td class="text-center">${grandJobs}</td>
+                            ${grandMonthly.map(val => `<td class="text-right text-cyan-300">₱${val.toFixed(2)}</td>`).join('')}
+                            <td class="text-right text-green-400">₱${grandTotal.toFixed(2)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    // ======================== EXPORT FUNCTIONS FOR REPORTS ========================
+    window.exportMonthlyCommissionExcel = function() {
+        recalculateStaffCommissions();
+        const now = new Date();
+        const month = now.getMonth();
+        const year = now.getFullYear();
+        const monthTx = appData.transactions.filter(t => {
+            const d = new Date(t.date);
+            return d.getMonth() === month && d.getFullYear() === year;
+        });
+        const monthStaffMap = {};
+        appData.staff.forEach(s => {
+            monthStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, commission: 0 };
+        });
+        monthTx.forEach(t => {
+            if (t.staffCommissions) {
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = monthStaffMap[parseInt(staffId)];
+                    if (s) {
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.commission += (data.commission || 0);
+                    }
+                });
+            }
+        });
+        const data = Object.values(monthStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sales: `₱${s.sales.toFixed(2)}`,
+            commission: `₱${s.commission.toFixed(2)}`
+        }));
         const columns = [
-            { key: 'name', header: 'Staff Name' },
+            { key: 'name', header: 'Staff' },
             { key: 'position', header: 'Position' },
             { key: 'tier', header: 'Tier' },
             { key: 'jobs', header: 'Jobs' },
             { key: 'sales', header: 'Sales' },
-            { key: 'total', header: 'Commission' }
+            { key: 'commission', header: 'Commission' }
         ];
-        const data = report.data.map(r => ({
-            name: r.name,
-            position: r.position,
-            tier: `${r.tier}%`,
-            jobs: r.jobs,
-            sales: `₱${r.sales.toFixed(2)}`,
-            total: `₱${r.total.toFixed(2)}`
-        }));
-        generatePDF(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission Report`, `${period}_commission`, appData.systemSettings.companyLogo);
+        generateExcel(data, columns, 'Monthly Commission', 'monthly_commission');
     };
 
-    window.exportCommissionReportPeriodCSV = function(period) {
-        const report = generateCommissionReport(period);
+    window.exportMonthlyCommissionPDF = function() {
+        recalculateStaffCommissions();
+        const now = new Date();
+        const month = now.getMonth();
+        const year = now.getFullYear();
+        const monthTx = appData.transactions.filter(t => {
+            const d = new Date(t.date);
+            return d.getMonth() === month && d.getFullYear() === year;
+        });
+        const monthStaffMap = {};
+        appData.staff.forEach(s => {
+            monthStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, commission: 0 };
+        });
+        monthTx.forEach(t => {
+            if (t.staffCommissions) {
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = monthStaffMap[parseInt(staffId)];
+                    if (s) {
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.commission += (data.commission || 0);
+                    }
+                });
+            }
+        });
+        const data = Object.values(monthStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sales: `₱${s.sales.toFixed(2)}`,
+            commission: `₱${s.commission.toFixed(2)}`
+        }));
         const columns = [
-            { key: 'name', header: 'Staff Name' },
+            { key: 'name', header: 'Staff' },
             { key: 'position', header: 'Position' },
             { key: 'tier', header: 'Tier' },
             { key: 'jobs', header: 'Jobs' },
             { key: 'sales', header: 'Sales' },
-            { key: 'total', header: 'Commission' }
+            { key: 'commission', header: 'Commission' }
         ];
-        const data = report.data.map(r => ({
-            name: r.name,
-            position: r.position,
-            tier: `${r.tier}%`,
-            jobs: r.jobs,
-            sales: `₱${r.sales.toFixed(2)}`,
-            total: `₱${r.total.toFixed(2)}`
-        }));
-        generateCSV(data, columns, `${period}_commission`);
+        generatePDF(data, columns, 'Monthly Commission Report', 'monthly_commission', appData.systemSettings.companyLogo);
     };
 
-    window.printCommissionReportPeriod = function() {
+    window.exportMonthlyCommissionCSV = function() {
+        recalculateStaffCommissions();
+        const now = new Date();
+        const month = now.getMonth();
+        const year = now.getFullYear();
+        const monthTx = appData.transactions.filter(t => {
+            const d = new Date(t.date);
+            return d.getMonth() === month && d.getFullYear() === year;
+        });
+        const monthStaffMap = {};
+        appData.staff.forEach(s => {
+            monthStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, commission: 0 };
+        });
+        monthTx.forEach(t => {
+            if (t.staffCommissions) {
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = monthStaffMap[parseInt(staffId)];
+                    if (s) {
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.commission += (data.commission || 0);
+                    }
+                });
+            }
+        });
+        const data = Object.values(monthStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sales: `₱${s.sales.toFixed(2)}`,
+            commission: `₱${s.commission.toFixed(2)}`
+        }));
+        const columns = [
+            { key: 'name', header: 'Staff' },
+            { key: 'position', header: 'Position' },
+            { key: 'tier', header: 'Tier' },
+            { key: 'jobs', header: 'Jobs' },
+            { key: 'sales', header: 'Sales' },
+            { key: 'commission', header: 'Commission' }
+        ];
+        generateCSV(data, columns, 'monthly_commission');
+    };
+
+    window.exportYearlyCommissionExcel = function() {
+        recalculateStaffCommissions();
+        const year = new Date().getFullYear();
+        const yearTx = appData.transactions.filter(t => new Date(t.date).getFullYear() === year);
+        const yearStaffMap = {};
+        appData.staff.forEach(s => {
+            yearStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, commission: 0 };
+        });
+        yearTx.forEach(t => {
+            if (t.staffCommissions) {
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = yearStaffMap[parseInt(staffId)];
+                    if (s) {
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.commission += (data.commission || 0);
+                    }
+                });
+            }
+        });
+        const data = Object.values(yearStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sales: `₱${s.sales.toFixed(2)}`,
+            commission: `₱${s.commission.toFixed(2)}`
+        }));
+        const columns = [
+            { key: 'name', header: 'Staff' },
+            { key: 'position', header: 'Position' },
+            { key: 'tier', header: 'Tier' },
+            { key: 'jobs', header: 'Jobs' },
+            { key: 'sales', header: 'Sales' },
+            { key: 'commission', header: 'Commission' }
+        ];
+        generateExcel(data, columns, 'Yearly Commission', 'yearly_commission');
+    };
+
+    window.exportYearlyCommissionPDF = function() {
+        recalculateStaffCommissions();
+        const year = new Date().getFullYear();
+        const yearTx = appData.transactions.filter(t => new Date(t.date).getFullYear() === year);
+        const yearStaffMap = {};
+        appData.staff.forEach(s => {
+            yearStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, commission: 0 };
+        });
+        yearTx.forEach(t => {
+            if (t.staffCommissions) {
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = yearStaffMap[parseInt(staffId)];
+                    if (s) {
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.commission += (data.commission || 0);
+                    }
+                });
+            }
+        });
+        const data = Object.values(yearStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sales: `₱${s.sales.toFixed(2)}`,
+            commission: `₱${s.commission.toFixed(2)}`
+        }));
+        const columns = [
+            { key: 'name', header: 'Staff' },
+            { key: 'position', header: 'Position' },
+            { key: 'tier', header: 'Tier' },
+            { key: 'jobs', header: 'Jobs' },
+            { key: 'sales', header: 'Sales' },
+            { key: 'commission', header: 'Commission' }
+        ];
+        generatePDF(data, columns, 'Yearly Commission Report', 'yearly_commission', appData.systemSettings.companyLogo);
+    };
+
+    window.exportYearlyCommissionCSV = function() {
+        recalculateStaffCommissions();
+        const year = new Date().getFullYear();
+        const yearTx = appData.transactions.filter(t => new Date(t.date).getFullYear() === year);
+        const yearStaffMap = {};
+        appData.staff.forEach(s => {
+            yearStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, commission: 0 };
+        });
+        yearTx.forEach(t => {
+            if (t.staffCommissions) {
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = yearStaffMap[parseInt(staffId)];
+                    if (s) {
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.commission += (data.commission || 0);
+                    }
+                });
+            }
+        });
+        const data = Object.values(yearStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sales: `₱${s.sales.toFixed(2)}`,
+            commission: `₱${s.commission.toFixed(2)}`
+        }));
+        const columns = [
+            { key: 'name', header: 'Staff' },
+            { key: 'position', header: 'Position' },
+            { key: 'tier', header: 'Tier' },
+            { key: 'jobs', header: 'Jobs' },
+            { key: 'sales', header: 'Sales' },
+            { key: 'commission', header: 'Commission' }
+        ];
+        generateCSV(data, columns, 'yearly_commission');
+    };
+
+    window.printMonthlyCommission = function() {
         const printContent = document.querySelector('.card-premium').cloneNode(true);
         const win = window.open('', '_blank');
         const logoHtml = appData.systemSettings.companyLogo ? 
             `<div class="center"><img src="${appData.systemSettings.companyLogo}" style="max-width:100px;max-height:70px;object-fit:contain;"></div>` : '';
-        win.document.write(`<html><head><title>Commission Report</title><style>
+        win.document.write(`<html><head><title>Monthly Commission</title><style>
             body{font-family:monospace;padding:20px;background:white;color:black;}
             .center{text-align:center;}
             table{width:100%;border-collapse:collapse;font-size:10px;}
@@ -2404,282 +2770,244 @@
             .no-print{display:none;}
         </style></head><body>
             ${logoHtml}
-            <div class="header"><h2>${appData.systemSettings.companyName}</h2><p>${commissionPeriod.charAt(0).toUpperCase() + commissionPeriod.slice(1)} Commission Report</p></div>
+            <div class="header"><h2>${appData.systemSettings.companyName}</h2><p>Monthly Commission Report</p></div>
             ${printContent.innerHTML}
         </body></html>`);
         win.document.close();
         win.print();
     };
 
-    // ======================== CUSTOMER DATABASE WITH FULL CRUD ========================
-    function renderCustomers() {
-        if(showLogin) return renderLogin();
-        
-        // Build customer transaction data
-        let customerData = appData.customers.map(c => {
-            const tx = appData.transactions.filter(t => t.customer === c.name || t.customerId === c.id);
-            const recentTx = tx.slice(0, 5);
-            const totalSpent = tx.reduce((sum, t) => sum + t.total, 0);
-            const creditBal = (appData.credits || []).filter(cr => cr.customerName === c.name).reduce((sum, cr) => sum + (cr.balance || 0), 0);
-            
-            return {
-                ...c,
-                totalTransactions: tx.length,
-                totalSpent: totalSpent,
-                creditBalance: creditBal,
-                recentTransactions: recentTx
-            };
-        });
-
-        let tableRows = customerData.map((c, idx) => {
-            const recentTxHtml = c.recentTransactions.map(t => 
-                `<div class="text-xs text-gray-400">${t.id} - ₱${t.total.toFixed(2)}</div>`
-            ).join('');
-
-            return `<tr class="border-b border-gray-700 hover:bg-gray-800 transition">
-                <td class="py-2 text-center">${idx + 1}</td>
-                <td class="font-semibold">${c.name}</td>
-                <td>${c.mobile || '—'}</td>
-                <td>${c.vehicleInfo || '—'}</td>
-                <td>${c.plate || '—'}</td>
-                <td class="text-cyan-400">${c.loyaltyPoints || 0}</td>
-                <td class="${c.creditBalance > 0 ? 'text-red-400' : 'text-green-400'}">₱${c.creditBalance.toFixed(2)}</td>
-                <td class="text-xs">${recentTxHtml || 'No transactions'}</td>
-                <td class="text-center">
-                    <button onclick="editCustomer(${c.id})" class="action-btn bg-cyan-600 text-white hover:bg-cyan-700"><i class="fas fa-edit"></i></button>
-                    <button onclick="viewCustomerFullHistory(${c.id})" class="action-btn bg-purple-600 text-white hover:bg-purple-700"><i class="fas fa-history"></i></button>
-                    <button onclick="deleteCustomer(${c.id})" class="action-btn bg-red-600 text-white hover:bg-red-700"><i class="fas fa-trash"></i></button>
-                </td>
-            </tr>`;
-        }).join('');
-
-        return `<div class="card-premium p-6">
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <div>
-                    <h2 class="text-2xl font-bold"><i class="fas fa-users"></i> Customer Database</h2>
-                    <p class="text-sm text-gray-400">${appData.customers.length} customers</p>
-                    ${isFirebasePrimary ? `<span class="firebase-primary-badge"><i class="fas fa-database"></i> Firebase Primary</span>` : ''}
-                </div>
-                <div class="flex gap-2 flex-wrap">
-                    <button onclick="showAddCustomerModal()" class="bg-green-600 px-3 py-1 rounded text-sm"><i class="fas fa-plus"></i> Add Customer</button>
-                    <button onclick="exportCustomers()" class="excel-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
-                    <button onclick="exportCustomersPDF()" class="pdf-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
-                    <button onclick="exportCustomersCSV()" class="csv-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
-                    <button onclick="printCustomers()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-print"></i> Print</button>
-                </div>
-            </div>
-            <div class="overflow-x-auto max-h-96 overflow-y-auto">
-                <table class="w-full text-sm">
-                    <thead class="sticky top-0 bg-gray-900 border-b-2 border-cyan-400">
-                        <tr>
-                            <th class="text-center py-2">#</th>
-                            <th class="text-left py-2">Name</th>
-                            <th class="text-left py-2">Contact</th>
-                            <th class="text-left py-2">Vehicle</th>
-                            <th class="text-left py-2">Plate</th>
-                            <th class="text-center py-2">Loyalty Points</th>
-                            <th class="text-right py-2">Credit Balance</th>
-                            <th class="text-left py-2">Recent TX</th>
-                            <th class="text-center py-2">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tableRows || '<tr><td colspan="9" class="text-center py-8 text-gray-400">No customers found</td></tr>'}
-                    </tbody>
-                </table>
-            </div>
-        </div>`;
-    }
-
-    window.showAddCustomerModal = () => {
-        let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content">
-            <h3 class="text-xl font-bold mb-4">Add New Customer</h3>
-            <div class="space-y-3">
-                <div><label class="text-gray-400">Full Name *</label><input type="text" id="newCustName" class="w-full bg-gray-800 p-2 rounded"></div>
-                <div><label class="text-gray-400">Contact Number</label><input type="text" id="newCustMobile" class="w-full bg-gray-800 p-2 rounded" placeholder="0917 123 4567"></div>
-                <div><label class="text-gray-400">Vehicle Model</label><input type="text" id="newCustVehicle" class="w-full bg-gray-800 p-2 rounded" placeholder="Toyota Vios"></div>
-                <div><label class="text-gray-400">Plate Number</label><input type="text" id="newCustPlate" class="w-full bg-gray-800 p-2 rounded" placeholder="ABC-1234"></div>
-                <div class="flex gap-3 mt-4">
-                    <button onclick="confirmAddCustomer()" class="btn-neon flex-1 p-2 rounded">Add Customer</button>
-                    <button onclick="closeAdminModal()" class="bg-gray-700 flex-1 p-2 rounded">Cancel</button>
-                </div>
-            </div>
-        </div></div>`;
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-    };
-
-    window.confirmAddCustomer = () => {
-        const name = document.getElementById('newCustName')?.value?.trim();
-        if(!name) { alert("Customer name is required!"); return; }
-        if(appData.customers.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-            alert("Customer already exists!");
-            return;
-        }
-        appData.customers.push({
-            id: Date.now(),
-            name: name,
-            mobile: document.getElementById('newCustMobile')?.value || '',
-            vehicleInfo: document.getElementById('newCustVehicle')?.value || '',
-            plate: document.getElementById('newCustPlate')?.value || '',
-            loyaltyPoints: 0
-        });
-        saveToLocal();
-        closeAdminModal();
-        renderApp();
-        alert(`Customer "${name}" added!`);
-    };
-
-    window.editCustomer = (id) => {
-        const c = appData.customers.find(c => c.id === id);
-        if(!c) return;
-        let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content">
-            <h3 class="text-xl font-bold mb-4">Edit Customer</h3>
-            <div class="space-y-3">
-                <div><label class="text-gray-400">Full Name</label><input type="text" id="editCustName" class="w-full bg-gray-800 p-2 rounded" value="${c.name}"></div>
-                <div><label class="text-gray-400">Contact Number</label><input type="text" id="editCustMobile" class="w-full bg-gray-800 p-2 rounded" value="${c.mobile || ''}"></div>
-                <div><label class="text-gray-400">Vehicle Model</label><input type="text" id="editCustVehicle" class="w-full bg-gray-800 p-2 rounded" value="${c.vehicleInfo || ''}"></div>
-                <div><label class="text-gray-400">Plate Number</label><input type="text" id="editCustPlate" class="w-full bg-gray-800 p-2 rounded" value="${c.plate || ''}"></div>
-                <div><label class="text-gray-400">Loyalty Points</label><input type="number" id="editCustPoints" class="w-full bg-gray-800 p-2 rounded" value="${c.loyaltyPoints || 0}"></div>
-                <div class="flex gap-3 mt-4">
-                    <button onclick="confirmEditCustomer(${id})" class="btn-neon flex-1 p-2 rounded">Update</button>
-                    <button onclick="closeAdminModal()" class="bg-gray-700 flex-1 p-2 rounded">Cancel</button>
-                </div>
-            </div>
-        </div></div>`;
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-    };
-
-    window.confirmEditCustomer = (id) => {
-        const c = appData.customers.find(c => c.id === id);
-        if(!c) return;
-        const name = document.getElementById('editCustName')?.value?.trim();
-        if(!name) { alert("Name is required!"); return; }
-        c.name = name;
-        c.mobile = document.getElementById('editCustMobile')?.value || '';
-        c.vehicleInfo = document.getElementById('editCustVehicle')?.value || '';
-        c.plate = document.getElementById('editCustPlate')?.value || '';
-        c.loyaltyPoints = parseInt(document.getElementById('editCustPoints')?.value) || 0;
-        saveToLocal();
-        closeAdminModal();
-        renderApp();
-        alert("Customer updated!");
-    };
-
-    window.viewCustomerFullHistory = (id) => {
-        const c = appData.customers.find(c => c.id === id);
-        if(!c) return;
-        const tx = appData.transactions.filter(t => t.customer === c.name || t.customerId === c.id);
-        const credits = appData.credits.filter(cr => cr.customerName === c.name);
-        
-        let msg = `=== CUSTOMER PROFILE ===\n`;
-        msg += `Name: ${c.name}\n`;
-        msg += `Contact: ${c.mobile || 'N/A'}\n`;
-        msg += `Vehicle: ${c.vehicleInfo || 'N/A'} | ${c.plate || 'N/A'}\n`;
-        msg += `Loyalty Points: ${c.loyaltyPoints || 0}\n`;
-        msg += `Total Transactions: ${tx.length}\n`;
-        msg += `Total Spent: ₱${tx.reduce((sum, t) => sum + t.total, 0).toFixed(2)}\n`;
-        msg += `Credit Balance: ₱${credits.reduce((sum, cr) => sum + (cr.balance || 0), 0).toFixed(2)}\n\n`;
-        msg += `--- RECENT TRANSACTIONS ---\n`;
-        tx.slice(0, 10).forEach((t, i) => {
-            msg += `${i+1}. ${t.id} - ${new Date(t.date).toLocaleDateString()} - ₱${t.total.toFixed(2)} - ${t.paymentMethod}\n`;
-        });
-        if(tx.length > 10) msg += `... and ${tx.length - 10} more\n\n`;
-        
-        if(credits.length > 0) {
-            msg += `--- CREDIT HISTORY ---\n`;
-            credits.forEach(cr => {
-                msg += `${cr.id} - ₱${cr.amount.toFixed(2)} | Paid: ₱${(cr.paid||0).toFixed(2)} | Balance: ₱${(cr.balance||0).toFixed(2)} | ${cr.status}\n`;
-            });
-        }
-        alert(msg);
-    };
-
-    window.deleteCustomer = (id) => {
-        if(!confirm("Delete this customer and all their data?")) return;
-        const c = appData.customers.find(c => c.id === id);
-        if(c) {
-            // Remove customer references from transactions
-            appData.transactions.forEach(t => {
-                if(t.customer === c.name) t.customer = "Deleted Customer";
-                if(t.customerId === id) t.customerId = null;
-            });
-            // Remove customer from credits
-            appData.credits = appData.credits.filter(cr => cr.customerName !== c.name);
-            // Remove customer from open services
-            appData.openServices.forEach(s => {
-                if(s.customer === c.name) s.customer = "Deleted Customer";
-            });
-            appData.customers = appData.customers.filter(c => c.id !== id);
-            saveToLocal();
-            renderApp();
-            alert("Customer deleted!");
-        }
-    };
-
-    window.printCustomers = function() {
+    window.printYearlyCommission = function() {
         const printContent = document.querySelector('.card-premium').cloneNode(true);
         const win = window.open('', '_blank');
         const logoHtml = appData.systemSettings.companyLogo ? 
             `<div class="center"><img src="${appData.systemSettings.companyLogo}" style="max-width:100px;max-height:70px;object-fit:contain;"></div>` : '';
-        win.document.write(`<html><head><title>Customers</title><style>
+        win.document.write(`<html><head><title>Yearly Commission</title><style>
             body{font-family:monospace;padding:20px;background:white;color:black;}
             .center{text-align:center;}
-            table{width:100%;border-collapse:collapse;font-size:10px;}
-            th,td{border:1px solid #ddd;padding:4px;}
+            table{width:100%;border-collapse:collapse;font-size:9px;}
+            th,td{border:1px solid #ddd;padding:3px;text-align:center;}
             th{background:#f0f0f0;}
             .header{margin-bottom:20px;}
             .no-print{display:none;}
         </style></head><body>
             ${logoHtml}
-            <div class="header"><h2>${appData.systemSettings.companyName}</h2><p>Customer Database - ${new Date().toISOString().slice(0,10)}</p></div>
+            <div class="header"><h2>${appData.systemSettings.companyName}</h2><p>Yearly Commission Report</p></div>
             ${printContent.innerHTML}
         </body></html>`);
         win.document.close();
         win.print();
     };
 
-    window.exportCustomersPDF = function() {
-        const data = appData.customers.map(c => ({
-            name: c.name,
-            contact: c.mobile || '—',
-            vehicle: c.vehicleInfo || '—',
-            plate: c.plate || '—',
-            points: c.loyaltyPoints || 0,
-            transactions: appData.transactions.filter(t => t.customer === c.name || t.customerId === c.id).length,
-            spent: `₱${appData.transactions.filter(t => t.customer === c.name || t.customerId === c.id).reduce((sum, t) => sum + t.total, 0).toFixed(2)}`
+    window.exportWeeklyCommissionExcel = function() {
+        recalculateStaffCommissions();
+        const now = new Date();
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        const weekTx = appData.transactions.filter(t => t.date >= weekStart.toISOString().slice(0,10) && t.date <= weekEnd.toISOString().slice(0,10));
+        const weekStaffMap = {};
+        appData.staff.forEach(s => {
+            weekStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, sunday:0, monday:0, tuesday:0, wednesday:0, thursday:0, friday:0, saturday:0, total:0 };
+        });
+        weekTx.forEach(t => {
+            if (t.staffCommissions) {
+                const txDate = new Date(t.date);
+                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()].toLowerCase();
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = weekStaffMap[parseInt(staffId)];
+                    if (s) {
+                        const comm = data.commission || 0;
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.total += comm;
+                        s[dayName] = (s[dayName] || 0) + comm;
+                    }
+                });
+            }
+        });
+        const data = Object.values(weekStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sunday: `₱${(s.sunday||0).toFixed(2)}`,
+            monday: `₱${(s.monday||0).toFixed(2)}`,
+            tuesday: `₱${(s.tuesday||0).toFixed(2)}`,
+            wednesday: `₱${(s.wednesday||0).toFixed(2)}`,
+            thursday: `₱${(s.thursday||0).toFixed(2)}`,
+            friday: `₱${(s.friday||0).toFixed(2)}`,
+            saturday: `₱${(s.saturday||0).toFixed(2)}`,
+            part1: `₱${((s.sunday||0)+(s.monday||0)+(s.tuesday||0)).toFixed(2)}`,
+            part2: `₱${((s.wednesday||0)+(s.thursday||0)+(s.friday||0)+(s.saturday||0)).toFixed(2)}`,
+            total: `₱${s.total.toFixed(2)}`
         }));
         const columns = [
-            { key: 'name', header: 'Name' },
-            { key: 'contact', header: 'Contact' },
-            { key: 'vehicle', header: 'Vehicle' },
-            { key: 'plate', header: 'Plate' },
-            { key: 'points', header: 'Points' },
-            { key: 'transactions', header: 'TX Count' },
-            { key: 'spent', header: 'Total Spent' }
+            { key: 'name', header: 'Staff Name' },
+            { key: 'position', header: 'Position' },
+            { key: 'tier', header: 'Tier' },
+            { key: 'jobs', header: 'Jobs Count' },
+            { key: 'sunday', header: 'Sunday' },
+            { key: 'monday', header: 'Monday' },
+            { key: 'tuesday', header: 'Tuesday' },
+            { key: 'wednesday', header: 'Wednesday' },
+            { key: 'thursday', header: 'Thursday' },
+            { key: 'friday', header: 'Friday' },
+            { key: 'saturday', header: 'Saturday' },
+            { key: 'part1', header: 'Sun-Tue' },
+            { key: 'part2', header: 'Wed-Sat' },
+            { key: 'total', header: 'Grand Total' }
         ];
-        generatePDF(data, columns, 'Customer Database', 'customers', appData.systemSettings.companyLogo);
+        generateExcel(data, columns, 'Weekly Commission', 'weekly_commission');
     };
 
-    window.exportCustomersCSV = function() {
-        const data = appData.customers.map(c => ({
-            name: c.name,
-            contact: c.mobile || '—',
-            vehicle: c.vehicleInfo || '—',
-            plate: c.plate || '—',
-            points: c.loyaltyPoints || 0,
-            transactions: appData.transactions.filter(t => t.customer === c.name || t.customerId === c.id).length,
-            spent: `₱${appData.transactions.filter(t => t.customer === c.name || t.customerId === c.id).reduce((sum, t) => sum + t.total, 0).toFixed(2)}`
+    window.exportWeeklyCommissionPDF = function() {
+        recalculateStaffCommissions();
+        const now = new Date();
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        const weekTx = appData.transactions.filter(t => t.date >= weekStart.toISOString().slice(0,10) && t.date <= weekEnd.toISOString().slice(0,10));
+        const weekStaffMap = {};
+        appData.staff.forEach(s => {
+            weekStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, sunday:0, monday:0, tuesday:0, wednesday:0, thursday:0, friday:0, saturday:0, total:0 };
+        });
+        weekTx.forEach(t => {
+            if (t.staffCommissions) {
+                const txDate = new Date(t.date);
+                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()].toLowerCase();
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = weekStaffMap[parseInt(staffId)];
+                    if (s) {
+                        const comm = data.commission || 0;
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.total += comm;
+                        s[dayName] = (s[dayName] || 0) + comm;
+                    }
+                });
+            }
+        });
+        const data = Object.values(weekStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sunday: `₱${(s.sunday||0).toFixed(2)}`,
+            monday: `₱${(s.monday||0).toFixed(2)}`,
+            tuesday: `₱${(s.tuesday||0).toFixed(2)}`,
+            wednesday: `₱${(s.wednesday||0).toFixed(2)}`,
+            thursday: `₱${(s.thursday||0).toFixed(2)}`,
+            friday: `₱${(s.friday||0).toFixed(2)}`,
+            saturday: `₱${(s.saturday||0).toFixed(2)}`,
+            part1: `₱${((s.sunday||0)+(s.monday||0)+(s.tuesday||0)).toFixed(2)}`,
+            part2: `₱${((s.wednesday||0)+(s.thursday||0)+(s.friday||0)+(s.saturday||0)).toFixed(2)}`,
+            total: `₱${s.total.toFixed(2)}`
         }));
         const columns = [
-            { key: 'name', header: 'Name' },
-            { key: 'contact', header: 'Contact' },
-            { key: 'vehicle', header: 'Vehicle' },
-            { key: 'plate', header: 'Plate' },
-            { key: 'points', header: 'Points' },
-            { key: 'transactions', header: 'TX Count' },
-            { key: 'spent', header: 'Total Spent' }
+            { key: 'name', header: 'Staff Name' },
+            { key: 'position', header: 'Position' },
+            { key: 'tier', header: 'Tier' },
+            { key: 'jobs', header: 'Jobs Count' },
+            { key: 'sunday', header: 'Sunday' },
+            { key: 'monday', header: 'Monday' },
+            { key: 'tuesday', header: 'Tuesday' },
+            { key: 'wednesday', header: 'Wednesday' },
+            { key: 'thursday', header: 'Thursday' },
+            { key: 'friday', header: 'Friday' },
+            { key: 'saturday', header: 'Saturday' },
+            { key: 'part1', header: 'Sun-Tue' },
+            { key: 'part2', header: 'Wed-Sat' },
+            { key: 'total', header: 'Grand Total' }
         ];
-        generateCSV(data, columns, 'customers');
+        generatePDF(data, columns, 'Weekly Commission Report', 'weekly_commission', appData.systemSettings.companyLogo);
+    };
+
+    window.exportWeeklyCommissionCSV = function() {
+        recalculateStaffCommissions();
+        const now = new Date();
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        const weekTx = appData.transactions.filter(t => t.date >= weekStart.toISOString().slice(0,10) && t.date <= weekEnd.toISOString().slice(0,10));
+        const weekStaffMap = {};
+        appData.staff.forEach(s => {
+            weekStaffMap[s.id] = { name: s.name, position: s.position, tier: s.commissionTier, jobs: 0, sales: 0, sunday:0, monday:0, tuesday:0, wednesday:0, thursday:0, friday:0, saturday:0, total:0 };
+        });
+        weekTx.forEach(t => {
+            if (t.staffCommissions) {
+                const txDate = new Date(t.date);
+                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()].toLowerCase();
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const s = weekStaffMap[parseInt(staffId)];
+                    if (s) {
+                        const comm = data.commission || 0;
+                        s.jobs += (data.jobs || 1);
+                        s.sales += (t.total || 0);
+                        s.total += comm;
+                        s[dayName] = (s[dayName] || 0) + comm;
+                    }
+                });
+            }
+        });
+        const data = Object.values(weekStaffMap).map(s => ({
+            name: s.name,
+            position: s.position,
+            tier: `${s.tier}%`,
+            jobs: s.jobs,
+            sunday: `₱${(s.sunday||0).toFixed(2)}`,
+            monday: `₱${(s.monday||0).toFixed(2)}`,
+            tuesday: `₱${(s.tuesday||0).toFixed(2)}`,
+            wednesday: `₱${(s.wednesday||0).toFixed(2)}`,
+            thursday: `₱${(s.thursday||0).toFixed(2)}`,
+            friday: `₱${(s.friday||0).toFixed(2)}`,
+            saturday: `₱${(s.saturday||0).toFixed(2)}`,
+            part1: `₱${((s.sunday||0)+(s.monday||0)+(s.tuesday||0)).toFixed(2)}`,
+            part2: `₱${((s.wednesday||0)+(s.thursday||0)+(s.friday||0)+(s.saturday||0)).toFixed(2)}`,
+            total: `₱${s.total.toFixed(2)}`
+        }));
+        const columns = [
+            { key: 'name', header: 'Staff Name' },
+            { key: 'position', header: 'Position' },
+            { key: 'tier', header: 'Tier' },
+            { key: 'jobs', header: 'Jobs Count' },
+            { key: 'sunday', header: 'Sunday' },
+            { key: 'monday', header: 'Monday' },
+            { key: 'tuesday', header: 'Tuesday' },
+            { key: 'wednesday', header: 'Wednesday' },
+            { key: 'thursday', header: 'Thursday' },
+            { key: 'friday', header: 'Friday' },
+            { key: 'saturday', header: 'Saturday' },
+            { key: 'part1', header: 'Sun-Tue' },
+            { key: 'part2', header: 'Wed-Sat' },
+            { key: 'total', header: 'Grand Total' }
+        ];
+        generateCSV(data, columns, 'weekly_commission');
+    };
+
+    window.printWeeklyCommission = function() {
+        const printContent = document.querySelector('.card-premium').cloneNode(true);
+        const win = window.open('', '_blank');
+        const logoHtml = appData.systemSettings.companyLogo ? 
+            `<div class="center"><img src="${appData.systemSettings.companyLogo}" style="max-width:100px;max-height:70px;object-fit:contain;"></div>` : '';
+        win.document.write(`<html><head><title>Weekly Commission</title><style>
+            body{font-family:monospace;padding:20px;background:white;color:black;}
+            .center{text-align:center;}
+            table{width:100%;border-collapse:collapse;font-size:10px;}
+            th,td{border:1px solid #ddd;padding:4px;text-align:center;}
+            th{background:#f0f0f0;}
+            .header{margin-bottom:20px;}
+            .no-print{display:none;}
+        </style></head><body>
+            ${logoHtml}
+            <div class="header"><h2>${appData.systemSettings.companyName}</h2><p>Weekly Commission Report</p></div>
+            ${printContent.innerHTML}
+        </body></html>`);
+        win.document.close();
+        win.print();
     };
 
     // ======================== CREDIT MANAGEMENT ========================
@@ -2711,7 +3039,7 @@
                 <div>
                     <h2 class="text-2xl font-bold"><i class="fas fa-hand-holding-usd"></i> Credit (Utang) Management</h2>
                     <p class="text-sm text-gray-400">Total Outstanding: <span class="text-red-400 font-bold">₱${totalCredit.toFixed(2)}</span></p>
-                    ${isFirebasePrimary ? `<span class="firebase-primary-badge"><i class="fas fa-database"></i> Firebase Primary</span>` : ''}
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-database"></i> Firebase Primary</p>` : ''}
                 </div>
                 <div class="flex gap-2 flex-wrap">
                     <button onclick="showAddCreditModal()" class="bg-green-600 px-3 py-1 rounded text-sm"><i class="fas fa-plus"></i> Add Credit</button>
@@ -3118,8 +3446,8 @@
             <div class="flex justify-between items-center mb-4">
                 <div>
                     <h2 class="text-2xl font-bold"><i class="fas fa-clipboard-list"></i> Open Services Dashboard</h2>
-                    <p class="text-xs text-green-400 mt-1"><i class="fas fa-sync"></i> Auto-commission sync to Reports | Real-time updates enabled</p>
-                    ${isFirebasePrimary ? `<span class="firebase-primary-badge"><i class="fas fa-database"></i> Firebase Primary</span>` : ''}
+                    <p class="text-xs text-green-400 mt-1"><i class="fas fa-sync"></i> Auto-commission sync to Weekly Report | Real-time updates enabled</p>
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-database"></i> Firebase Primary</p>` : ''}
                 </div>
                 <div class="flex gap-2">
                     <button onclick="exportOpenServices()" class="excel-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
@@ -3445,6 +3773,230 @@
         renderApp();
     }
 
+    // ======================== CUSTOMER FUNCTIONS ========================
+    function renderCustomers() {
+        if(showLogin) return renderLogin();
+        
+        let customerRows = appData.customers.map(c => {
+            const customerTx = appData.transactions.filter(t => t.customerId === c.id);
+            const totalSpent = customerTx.reduce((s,t) => s + t.total, 0);
+            return `<tr class="border-b border-gray-700 hover:bg-gray-800 transition">
+                <td class="py-2 font-semibold">${c.name}</td>
+                <td class="text-xs">${c.mobile || '—'}</td>
+                <td class="text-xs">${c.vehicleInfo || '—'}</td>
+                <td class="text-xs">${c.plate || '—'}</td>
+                <td class="text-center">${c.loyaltyPoints || 0}</td>
+                <td class="text-right">₱${totalSpent.toFixed(2)}</td>
+                <td class="text-right text-cyan-400">${customerTx.length}</td>
+                <td>
+                    <div class="column-actions">
+                        <button onclick="viewCustomerHistory(${c.id})" class="action-btn bg-purple-600 text-white"><i class="fas fa-eye"></i></button>
+                        <button onclick="editCustomer(${c.id})" class="action-btn bg-cyan-600 text-white"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteCustomer(${c.id})" class="action-btn bg-red-600 text-white"><i class="fas fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+
+        return `<div class="card-premium p-6">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div>
+                    <h2 class="text-2xl font-bold"><i class="fas fa-user-friends"></i> Customer Database</h2>
+                    <p class="text-sm text-gray-400">${appData.customers.length} total customers</p>
+                    ${firebaseInitialized && isFirebasePrimary ? `<span class="firebase-primary-badge"><i class="fas fa-database"></i> Firebase Primary</span>` : ''}
+                </div>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="showAddCustomerModal()" class="bg-green-600 px-3 py-1 rounded text-sm"><i class="fas fa-plus"></i> Add Customer</button>
+                    <button onclick="exportCustomers()" class="excel-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
+                    <button onclick="exportCustomerPDF()" class="pdf-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
+                    <button onclick="printCustomers()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-gray-900 border-b-2 border-cyan-400">
+                        <tr>
+                            <th class="text-left py-2">Customer</th>
+                            <th class="text-left py-2">Contact</th>
+                            <th class="text-left py-2">Vehicle</th>
+                            <th class="text-left py-2">Plate</th>
+                            <th class="text-center py-2">Points</th>
+                            <th class="text-right py-2">Total Spent</th>
+                            <th class="text-center py-2">Transactions</th>
+                            <th class="text-center py-2">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${customerRows || '<tr><td colspan="8" class="text-center py-8 text-gray-400">No customers found</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    window.showAddCustomerModal = () => {
+        let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content">
+            <h3 class="text-xl font-bold mb-4">Add New Customer</h3>
+            <div class="space-y-3">
+                <div><label class="text-gray-400">Full Name *</label><input type="text" id="newCustName" class="w-full bg-gray-800 p-2 rounded"></div>
+                <div><label class="text-gray-400">Contact Number</label><input type="text" id="newCustMobile" class="w-full bg-gray-800 p-2 rounded"></div>
+                <div><label class="text-gray-400">Vehicle Model</label><input type="text" id="newCustVehicle" class="w-full bg-gray-800 p-2 rounded"></div>
+                <div><label class="text-gray-400">Plate Number</label><input type="text" id="newCustPlate" class="w-full bg-gray-800 p-2 rounded"></div>
+                <div class="flex gap-3 mt-4">
+                    <button onclick="confirmAddCustomer()" class="btn-neon flex-1 p-2 rounded">Add Customer</button>
+                    <button onclick="closeAdminModal()" class="bg-gray-700 flex-1 p-2 rounded">Cancel</button>
+                </div>
+            </div>
+        </div></div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    };
+
+    window.confirmAddCustomer = () => {
+        const name = document.getElementById('newCustName')?.value?.trim();
+        if(!name) { alert("Customer name is required!"); return; }
+        const mobile = document.getElementById('newCustMobile')?.value || '';
+        const vehicle = document.getElementById('newCustVehicle')?.value || '';
+        const plate = document.getElementById('newCustPlate')?.value || '';
+        const newCustomer = { 
+            id: Date.now(), 
+            name: name, 
+            mobile: mobile, 
+            vehicleInfo: vehicle, 
+            plate: plate,
+            loyaltyPoints: 0,
+            createdAt: new Date().toISOString()
+        };
+        appData.customers.push(newCustomer);
+        saveToLocal();
+        closeAdminModal();
+        renderApp();
+        alert(`✅ Customer "${name}" added successfully!`);
+    };
+
+    window.editCustomer = (id) => {
+        const c = appData.customers.find(c => c.id === id);
+        if(!c) return;
+        let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content">
+            <h3 class="text-xl font-bold mb-4">Edit Customer</h3>
+            <div class="space-y-3">
+                <div><label class="text-gray-400">Full Name</label><input type="text" id="editCustName" class="w-full bg-gray-800 p-2 rounded" value="${c.name}"></div>
+                <div><label class="text-gray-400">Contact Number</label><input type="text" id="editCustMobile" class="w-full bg-gray-800 p-2 rounded" value="${c.mobile || ''}"></div>
+                <div><label class="text-gray-400">Vehicle Model</label><input type="text" id="editCustVehicle" class="w-full bg-gray-800 p-2 rounded" value="${c.vehicleInfo || ''}"></div>
+                <div><label class="text-gray-400">Plate Number</label><input type="text" id="editCustPlate" class="w-full bg-gray-800 p-2 rounded" value="${c.plate || ''}"></div>
+                <div><label class="text-gray-400">Loyalty Points</label><input type="number" id="editCustPoints" class="w-full bg-gray-800 p-2 rounded" value="${c.loyaltyPoints || 0}"></div>
+                <div class="flex gap-3 mt-4">
+                    <button onclick="confirmEditCustomer(${id})" class="btn-neon flex-1 p-2 rounded">Update</button>
+                    <button onclick="closeAdminModal()" class="bg-gray-700 flex-1 p-2 rounded">Cancel</button>
+                </div>
+            </div>
+        </div></div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    };
+
+    window.confirmEditCustomer = (id) => {
+        const c = appData.customers.find(c => c.id === id);
+        if(!c) return;
+        const name = document.getElementById('editCustName')?.value?.trim();
+        const mobile = document.getElementById('editCustMobile')?.value || '';
+        const vehicle = document.getElementById('editCustVehicle')?.value || '';
+        const plate = document.getElementById('editCustPlate')?.value || '';
+        const points = parseInt(document.getElementById('editCustPoints')?.value) || 0;
+        if(name) c.name = name;
+        c.mobile = mobile;
+        c.vehicleInfo = vehicle;
+        c.plate = plate;
+        c.loyaltyPoints = points;
+        saveToLocal();
+        closeAdminModal();
+        renderApp();
+        alert('✅ Customer updated!');
+    };
+
+    window.deleteCustomer = (id) => {
+        if(confirm("Delete this customer? This will not delete their transactions.")) {
+            appData.customers = appData.customers.filter(c => c.id !== id);
+            saveToLocal();
+            renderApp();
+        }
+    };
+
+    window.exportCustomerPDF = function() {
+        const data = appData.customers.map(c => ({
+            name: c.name,
+            mobile: c.mobile || '—',
+            vehicle: c.vehicleInfo || '—',
+            plate: c.plate || '—',
+            points: c.loyaltyPoints || 0,
+            spent: `₱${appData.transactions.filter(t => t.customerId === c.id).reduce((s,t) => s + t.total, 0).toFixed(2)}`,
+            tx: appData.transactions.filter(t => t.customerId === c.id).length
+        }));
+        const columns = [
+            { key: 'name', header: 'Customer' },
+            { key: 'mobile', header: 'Contact' },
+            { key: 'vehicle', header: 'Vehicle' },
+            { key: 'plate', header: 'Plate' },
+            { key: 'points', header: 'Points' },
+            { key: 'spent', header: 'Total Spent' },
+            { key: 'tx', header: 'Transactions' }
+        ];
+        generatePDF(data, columns, 'Customer Database', 'customers', appData.systemSettings.companyLogo);
+    };
+
+    window.printCustomers = function() {
+        const printContent = document.querySelector('.card-premium').cloneNode(true);
+        const win = window.open('', '_blank');
+        const logoHtml = appData.systemSettings.companyLogo ? 
+            `<div class="center"><img src="${appData.systemSettings.companyLogo}" style="max-width:100px;max-height:70px;object-fit:contain;"></div>` : '';
+        win.document.write(`<html><head><title>Customers</title><style>
+            body{font-family:monospace;padding:20px;background:white;color:black;}
+            .center{text-align:center;}
+            table{width:100%;border-collapse:collapse;font-size:10px;}
+            th,td{border:1px solid #ddd;padding:4px;}
+            th{background:#f0f0f0;}
+            .header{margin-bottom:20px;}
+            .no-print{display:none;}
+        </style></head><body>
+            ${logoHtml}
+            <div class="header"><h2>${appData.systemSettings.companyName}</h2><p>Customer Database - ${new Date().toISOString().slice(0,10)}</p></div>
+            ${printContent.innerHTML}
+        </body></html>`);
+        win.document.close();
+        win.print();
+    };
+
+    window.viewCustomerHistory = (id) => {
+        const tx = appData.transactions.filter(t => t.customerId === id);
+        const credits = appData.credits.filter(c => {
+            const cust = appData.customers.find(cu => cu.id === id);
+            return cust && c.customerName === cust.name;
+        });
+        let msg = `Customer has ${tx.length} transaction(s).\n`;
+        msg += `Total spent: ₱${tx.reduce((s,t)=>s+t.total,0).toFixed(2)}\n`;
+        msg += `Credit Balance: ₱${credits.reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}\n\n`;
+        msg += `Recent Transactions:\n`;
+        tx.slice(0, 10).forEach(t => {
+            msg += `  ${t.id} - ${new Date(t.date).toLocaleDateString()} - ₱${t.total.toFixed(2)} - ${t.paymentMethod}\n`;
+        });
+        if (tx.length > 10) msg += `  ... and ${tx.length - 10} more`;
+        alert(msg);
+    };
+
+    window.selectCustomerPopup = () => {
+        let name = prompt("Customer name (or enter new):");
+        if(name) {
+            let existing = appData.customers.find(c => c.name.toLowerCase() === name.toLowerCase());
+            if(existing) {
+                selectedCustomer = existing;
+            } else {
+                let newCust = { id: Date.now(), name: name, loyaltyPoints: 0, mobile: "", vehicleInfo: "", plate: "" };
+                appData.customers.push(newCust);
+                selectedCustomer = newCust;
+                saveToLocal();
+            }
+            renderApp();
+        }
+    };
+
     // ======================== STAFF FUNCTIONS ========================
     function renderStaffDashboard() {
         if(showLogin) return renderLogin();
@@ -3602,7 +4154,7 @@
         let pos = prompt("Position:") || "Staff";
         let tier = parseInt(prompt("Commission Tier (30, 35, 40):", "35"));
         if([30,35,40].includes(tier)) {
-            appData.staff.push({ id: Date.now(), name, position: pos, contact: "", salesGenerated: 0, jobsCompleted: 0, commissionTier: tier, isActive: true, totalCommission: 0, weeklyBreakdown: { Sunday: 0, Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0 }, monthlyBreakdown: {}, yearlyBreakdown: {} });
+            appData.staff.push({ id: Date.now(), name, position: pos, contact: "", salesGenerated: 0, jobsCompleted: 0, commissionTier: tier, isActive: true, totalCommission: 0 });
             saveToLocal(); renderApp();
         }
     };
@@ -3659,7 +4211,9 @@
             { id: 'transactiontracking', icon: 'fa-exchange-alt', label: 'Transaction Tracking' },
             { id: 'reports', icon: 'fa-chart-pie', label: 'Report Summaries' },
             { id: 'dashboard', icon: 'fa-tachometer-alt', label: 'Dashboard' },
-            { id: 'commissionreports', icon: 'fa-chart-pie', label: 'Commission Reports' },
+            { id: 'weeklycommission', icon: 'fa-calendar-week', label: 'Weekly Commission' },
+            { id: 'monthlycommission', icon: 'fa-calendar-alt', label: 'Monthly Commission' },
+            { id: 'yearlycommission', icon: 'fa-calendar-check', label: 'Yearly Commission' },
             { id: 'credit', icon: 'fa-hand-holding-usd', label: 'Credit (Utang)' },
             { id: 'services', icon: 'fa-concierge-bell', label: 'Services' },
             { id: 'categories', icon: 'fa-tags', label: 'Categories' },
@@ -3677,7 +4231,9 @@
         else if(currentAdminPanel === 'transactiontracking') content = renderTransactionTracking();
         else if(currentAdminPanel === 'reports') content = renderReportSummaries();
         else if(currentAdminPanel === 'dashboard') content = renderDashboard();
-        else if(currentAdminPanel === 'commissionreports') content = renderCommissionReports();
+        else if(currentAdminPanel === 'weeklycommission') content = renderWeeklyCommissionReport();
+        else if(currentAdminPanel === 'monthlycommission') content = renderMonthlyCommissionReport();
+        else if(currentAdminPanel === 'yearlycommission') content = renderYearlyCommissionReport();
         else if(currentAdminPanel === 'credit') content = renderCreditManagement();
         else if(currentAdminPanel === 'services') content = renderAdminServices();
         else if(currentAdminPanel === 'categories') content = renderAdminCategories();
@@ -3734,9 +4290,10 @@
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
-                    <p class="text-green-400 mt-1">✅ v8.7: Enhanced Commission Reports (Weekly/Monthly/Yearly)</p>
-                    <p class="text-green-400 mt-1">✅ Full Customer Database with CRUD operations</p>
-                    <p class="text-green-400 mt-1">🔄 All data stored in one Firebase database</p>
+                    <p class="text-green-400 mt-1">✅ v8.7: Firebase as primary storage with optimized performance</p>
+                    <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
+                    <p class="text-green-400 mt-1">⚡ Debounced sync prevents lag and duplicate requests</p>
+                    <p class="text-green-400 mt-1">📊 Weekly, Monthly, Yearly Commission Reports now available</p>
                 </div>
             </div>
         </div></div>`;
@@ -3852,7 +4409,7 @@
         const dailyTx = appData.transactions.filter(t => t.date.startsWith(todayStr));
         const dailySales = dailyTx.reduce((s,t)=>s+t.total,0);
         const dailyExpenses = appData.expenses.filter(e => e.date === todayStr).reduce((s,e)=>s+e.amount,0);
-        const dailyCommission = appData.staff.reduce((sum, s) => sum + (s.dailyCommission || 0), 0);
+        const dailyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
         
         const weekStart = new Date(today);
         weekStart.setDate(today.getDate() - today.getDay());
@@ -3864,7 +4421,6 @@
         const monthTx = appData.transactions.filter(t => new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear);
         const monthlySales = monthTx.reduce((s,t)=>s+t.total,0);
         const monthlyExpenses = appData.expenses.filter(e => new Date(e.date).getMonth() === currentMonth && new Date(e.date).getFullYear() === currentYear).reduce((s,e)=>s+e.amount,0);
-        const monthlyCommission = appData.staff.reduce((sum, s) => sum + (s.monthlyCommission || 0), 0);
         
         const yearTx = appData.transactions.filter(t => new Date(t.date).getFullYear() === currentYear);
         const yearlySales = yearTx.reduce((s,t)=>s+t.total,0);
@@ -3909,7 +4465,7 @@
                     </div>
                     <div class="bg-gray-800 p-3 rounded-lg text-center">
                         <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? 'This Week' : reportPeriod === 'monthly' ? 'This Month' : 'This Year'} Commission</div>
-                        <div class="stat-number text-yellow-400">₱${reportPeriod === 'daily' ? dailyCommission : reportPeriod === 'weekly' ? dailyCommission : reportPeriod === 'monthly' ? monthlyCommission : dailyCommission}</div>
+                        <div class="stat-number text-yellow-400">₱${dailyCommission.toFixed(2)}</div>
                     </div>
                     <div class="bg-gray-800 p-3 rounded-lg text-center">
                         <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? 'This Week' : reportPeriod === 'monthly' ? 'This Month' : 'This Year'} Profit</div>
@@ -4124,8 +4680,7 @@
         const weeklySales = weekTx.reduce((s,t)=>s+t.total,0);
         const monthlySales = monthTx.reduce((s,t)=>s+t.total,0);
         const dailyExpenses = appData.expenses.filter(e => e.date === today).reduce((s,e)=>s+e.amount,0);
-        const dailyCommission = appData.staff.reduce((sum, s) => sum + (s.dailyCommission || 0), 0);
-        const weeklyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
+        const dailyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
         const openCount = appData.openServices.filter(s => s.status === 'pending' || s.status === 'in-progress').length;
         const lowStock = appData.inventory.filter(i => i.quantity <= i.reorderLevel).length;
         const totalCredit = (appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0);
@@ -4178,7 +4733,7 @@
                 <div class="text-xs text-gray-500">${(appData.credits || []).filter(c => c.balance > 0).length} accounts</div>
             </div>
             <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
-                <div class="stat-label">Daily Commission</div>
+                <div class="stat-label">Today's Commission</div>
                 <div class="stat-number text-purple-400">₱${dailyCommission.toFixed(2)}</div>
                 <div class="text-xs text-gray-500">${appData.staff.length} staff</div>
             </div>
@@ -4931,15 +5486,15 @@
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.7 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.7 Stable | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
-                <div class="mt-1 text-green-400">✅ Enhanced Commission Reports (Weekly/Monthly/Yearly)</div>
-                <div class="mt-1 text-green-400">✅ Full Customer Database with CRUD operations</div>
+                <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
                 <div class="mt-1 text-cyan-400">📅 Auto-Commission on Service Complete | Real-time Sync</div>
                 <div class="mt-1 text-green-400">⚡ Debounced sync prevents lag and duplicate requests</div>
+                <div class="mt-1 text-cyan-400">📊 Weekly, Monthly, Yearly Commission Reports available</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🔥 Firebase: Connected (Primary) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🔥 Firebase: Disconnected - Using localStorage fallback</div>`}
                 <div class="mt-1 text-green-400">🔧 Data sanitization removes undefined values before syncing</div>
             </div>
@@ -5154,21 +5709,21 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7 Enhanced | ${firebaseInitialized && isFirebasePrimary ? '🔥 Firebase Primary - Real-time Sync ON' : '📡 Offline Mode'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7 Stable | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🔥 Firebase Primary - Real-time Sync ON' : '📡 Offline Mode'} | 📊 Weekly/Monthly/Yearly Reports</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7 (Enhanced)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7 (Stable)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
-    console.log('%c✅ Enhanced Commission Reports (Weekly/Monthly/Yearly)', 'color: #00ff88;');
-    console.log('%c✅ Full Customer Database with CRUD operations', 'color: #00ff88;');
+    console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
+    console.log('%c📊 Weekly, Monthly, Yearly Commission Reports Available', 'color: #00d4ff;');
     console.log(`%c🔥 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Primary)' : 'Disconnected (Using localStorage)'}`, 'color: #ffaa00;');
     console.log('%c⚡ Debounced sync prevents lag and duplicate requests', 'color: #00d4ff;');
-    console.log('%c🔄 v8.7: All data stored in one Firebase database', 'color: #00d4ff;');
+    console.log('%c🔄 v8.7: Firebase as primary storage with optimized performance', 'color: #00d4ff;');
     if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect', 'color: #ff6b6b;');
     } else {
@@ -5177,3 +5732,4 @@
 </script>
 </body>
 </html>
+```
