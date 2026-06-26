@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.7.3</title>
+    <title>8068 CAR SQUARE | POS System v8.7.4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -434,6 +434,19 @@
         .activity-item .badge { font-size: 9px; padding: 1px 8px; border-radius: 10px; }
         .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         @media (max-width: 768px) { .dashboard-grid { grid-template-columns: 1fr; } }
+        .chart-container { position: relative; height: 280px; width: 100%; }
+        .chart-period-selector { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+        .chart-period-btn { background: #1a1a1a; border: 1px solid #333; padding: 4px 12px; border-radius: 6px; color: #aaa; font-size: 11px; cursor: pointer; transition: all 0.2s; }
+        .chart-period-btn:hover { border-color: #00d4ff; color: #fff; }
+        .chart-period-btn.active { background: #00d4ff20; border-color: #00d4ff; color: #00d4ff; }
+        .dashboard-stat-card { background: rgba(10,10,10,0.4); border: 1px solid rgba(0,212,255,0.08); border-radius: 12px; padding: 16px; transition: all 0.3s; }
+        .dashboard-stat-card:hover { border-color: rgba(0,212,255,0.25); }
+        .dashboard-stat-card .stat-icon { font-size: 28px; opacity: 0.6; }
+        .dashboard-stat-card .stat-value { font-size: 26px; font-weight: 700; }
+        .dashboard-stat-card .stat-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+        .trend-up { color: #00ff88; }
+        .trend-down { color: #ff6b6b; }
+        .trend-neutral { color: #ffaa00; }
     </style>
 </head>
 <body class="text-white">
@@ -480,6 +493,8 @@
     let syncTimer = null;
     let isInitialLoad = true;
     let isOnline = true;
+    let chartInstance = null;
+    let chartPeriod = 'weekly';
 
     // ======================== DATA SANITIZATION ========================
     function sanitizeDataForFirebase(data) {
@@ -708,6 +723,7 @@
                 if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
                 if (!appData.systemSettings.enableNotifications) appData.systemSettings.enableNotifications = true;
                 if (!appData.systemSettings.inactivityTimeout) appData.systemSettings.inactivityTimeout = 30;
+                if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
                 dataLoaded = true;
                 addFirebaseLog('📂 Loaded from localStorage (cache)', 'info');
                 renderApp();
@@ -785,6 +801,7 @@
                         };
                     }
                     if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
+                    if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
                     dataLoaded = true;
                     if (hasChanges) {
                         saveToLocal();
@@ -845,7 +862,7 @@
             commissionMatrix: appData.commissionMatrix || {},
             reports: appData.reports || { weekly: [], monthly: [], yearly: [] },
             lastUpdated: new Date().toISOString(),
-            version: '8.7.3'
+            version: '8.7.4'
         };
 
         const dataToSync = sanitizeDataForFirebase(rawData);
@@ -1047,7 +1064,8 @@
             },
             activityLog: [],
             enableNotifications: true,
-            inactivityTimeout: 30
+            inactivityTimeout: 30,
+            chartDefaultPeriod: 'weekly'
         },
         users: [
             { id: 1, username: "owner", password: "owner123", role: "Owner", name: "Owner", isActive: true },
@@ -1125,6 +1143,7 @@
                 };
             }
             if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
+            if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
             dataLoaded = true;
         } catch(e) {}
     }
@@ -1573,7 +1592,7 @@
                     ${appData.systemSettings.appIcon ? `<img src="${appData.systemSettings.appIcon}" class="mx-auto max-h-20 mb-4 rounded-lg">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.3</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.4</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online Mode' : 'Offline Mode'}</p>
                 </div>
@@ -2777,7 +2796,61 @@
         }
     };
 
-    // ======================== ENHANCED DASHBOARD WITH QUICK STATS & ACTIVITY ========================
+    // ======================== ENHANCED DASHBOARD WITH INTERACTIVE CHART ========================
+    function getChartData(period) {
+        const now = new Date();
+        let labels = [];
+        let data = [];
+        let periodLabel = '';
+        
+        if (period === 'daily') {
+            // Last 30 days
+            const days = 30;
+            for (let i = days - 1; i >= 0; i--) {
+                const d = new Date(now);
+                d.setDate(now.getDate() - i);
+                const dateStr = d.toISOString().slice(0,10);
+                labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                const dayTx = appData.transactions.filter(t => t.date.startsWith(dateStr));
+                data.push(dayTx.reduce((s, t) => s + t.total, 0));
+            }
+            periodLabel = 'Daily (30 Days)';
+        } else if (period === 'weekly') {
+            // Last 12 weeks
+            const weeks = 12;
+            for (let i = weeks - 1; i >= 0; i--) {
+                const weekStart = new Date(now);
+                weekStart.setDate(now.getDate() - (now.getDay() + 7 * i));
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekStart.getDate() + 6);
+                const weekStartStr = weekStart.toISOString().slice(0,10);
+                const weekEndStr = weekEnd.toISOString().slice(0,10);
+                labels.push(`W${weeks - i}`);
+                const weekTx = appData.transactions.filter(t => t.date >= weekStartStr && t.date <= weekEndStr);
+                data.push(weekTx.reduce((s, t) => s + t.total, 0));
+            }
+            periodLabel = 'Weekly (12 Weeks)';
+        } else if (period === 'monthly') {
+            // Last 12 months
+            const months = 12;
+            for (let i = months - 1; i >= 0; i--) {
+                const d = new Date(now);
+                d.setMonth(now.getMonth() - i);
+                const month = d.getMonth();
+                const year = d.getFullYear();
+                labels.push(d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
+                const monthTx = appData.transactions.filter(t => {
+                    const td = new Date(t.date);
+                    return td.getMonth() === month && td.getFullYear() === year;
+                });
+                data.push(monthTx.reduce((s, t) => s + t.total, 0));
+            }
+            periodLabel = 'Monthly (12 Months)';
+        }
+        
+        return { labels, data, periodLabel };
+    }
+
     function renderDashboard() {
         if(showLogin) return renderLogin();
         
@@ -2850,6 +2923,13 @@
             </div>
         `;
 
+        // Chart - Get initial data
+        const defaultPeriod = appData.systemSettings.chartDefaultPeriod || 'weekly';
+        const chartData = getChartData(defaultPeriod);
+        const chartLabels = JSON.stringify(chartData.labels);
+        const chartValues = JSON.stringify(chartData.data);
+        const chartPeriodLabel = chartData.periodLabel;
+
         return `
             <div class="flex justify-between items-center mb-4">
                 <div class="flex items-center gap-3">
@@ -2859,7 +2939,7 @@
                         <span class="text-xs text-cyan-400 ml-3">👤 ${appData.currentUser?.name} (${appData.currentUser?.role})</span>
                         <button onclick="logout()" class="text-xs text-red-400 ml-3 hover:text-red-300"><i class="fas fa-sign-out-alt"></i> Logout</button>
                         ${firebaseInitialized && isFirebasePrimary ? `<span class="text-xs text-green-400 ml-3"><i class="fas fa-cloud"></i> Online</span>` : `<span class="text-xs text-yellow-400 ml-3"><i class="fas fa-sync-alt"></i> Offline</span>`}
-                        ${appData.systemSettings.enableNotifications ? `<span class="text-xs text-cyan-400 ml-3"><i class="fas fa-bell"></i></span>` : ''}
+                        ${appData.systemSettings.enableNotifications !== false ? `<span class="text-xs text-cyan-400 ml-3"><i class="fas fa-bell"></i></span>` : ''}
                     </div>
                 </div>
                 <div class="text-sm text-gray-400">${appData.systemSettings.businessHours}</div>
@@ -2911,13 +2991,23 @@
 
             <!-- Main Dashboard Grid -->
             <div class="dashboard-grid">
-                <!-- Left: Sales Chart -->
+                <!-- Left: Sales Chart with Period Selector -->
                 <div class="card-premium p-5">
-                    <h3 class="text-lg font-bold mb-3"><i class="fas fa-chart-line"></i> Weekly Sales Overview</h3>
-                    <canvas id="salesChart" height="200"></canvas>
+                    <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+                        <h3 class="text-lg font-bold"><i class="fas fa-chart-line"></i> Sales Overview</h3>
+                        <span class="text-xs text-gray-400" id="chartPeriodLabel">${chartPeriodLabel}</span>
+                    </div>
+                    <div class="chart-period-selector">
+                        <button class="chart-period-btn ${defaultPeriod === 'daily' ? 'active' : ''}" onclick="updateChartPeriod('daily')">Daily</button>
+                        <button class="chart-period-btn ${defaultPeriod === 'weekly' ? 'active' : ''}" onclick="updateChartPeriod('weekly')">Weekly</button>
+                        <button class="chart-period-btn ${defaultPeriod === 'monthly' ? 'active' : ''}" onclick="updateChartPeriod('monthly')">Monthly</button>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="salesChart"></canvas>
+                    </div>
                     <div class="flex justify-between mt-3 text-xs text-gray-500">
-                        <span>Total: ₱${weeklySales.toFixed(2)}</span>
-                        <span>${weekTx.length} transactions</span>
+                        <span>Total: ₱${chartData.data.reduce((a,b) => a + b, 0).toFixed(2)}</span>
+                        <span>${chartData.labels.length} periods</span>
                     </div>
                 </div>
                 
@@ -2986,35 +3076,149 @@
             </div>
 
             <script>
-                setTimeout(function() {
+                // Initialize chart
+                window.chartPeriod = '${defaultPeriod}';
+                window.chartLabels = ${chartLabels};
+                window.chartValues = ${chartValues};
+                
+                function initChart() {
                     const ctx = document.getElementById('salesChart')?.getContext('2d');
-                    if(ctx) {
-                        new Chart(ctx, {
-                            type: 'line',
-                            data: {
-                                labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
-                                datasets: [{
-                                    label: 'Sales (₱)',
-                                    data: [${weekTx.slice(0,7).map(t=>t.total).join(',')}],
-                                    borderColor: '#00d4ff',
-                                    tension: 0.3,
-                                    fill: true,
-                                    backgroundColor: 'rgba(0,212,255,0.1)'
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                plugins: {
-                                    legend: { display: false }
+                    if (!ctx) return;
+                    
+                    if (window.chartInstance) {
+                        window.chartInstance.destroy();
+                    }
+                    
+                    const gradient = ctx.createLinearGradient(0, 0, 0, 280);
+                    gradient.addColorStop(0, 'rgba(0, 212, 255, 0.3)');
+                    gradient.addColorStop(0.5, 'rgba(0, 212, 255, 0.1)');
+                    gradient.addColorStop(1, 'rgba(0, 212, 255, 0)');
+                    
+                    window.chartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: window.chartLabels,
+                            datasets: [{
+                                label: 'Sales (₱)',
+                                data: window.chartValues,
+                                borderColor: '#00d4ff',
+                                backgroundColor: gradient,
+                                fill: true,
+                                tension: 0.4,
+                                pointBackgroundColor: '#00d4ff',
+                                pointBorderColor: '#fff',
+                                pointBorderWidth: 2,
+                                pointRadius: 3,
+                                pointHoverRadius: 6,
+                                borderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    display: false
                                 },
-                                scales: {
-                                    y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
-                                    x: { grid: { display: false } }
+                                tooltip: {
+                                    backgroundColor: 'rgba(10, 10, 10, 0.9)',
+                                    borderColor: '#00d4ff',
+                                    borderWidth: 1,
+                                    titleColor: '#fff',
+                                    bodyColor: '#00d4ff',
+                                    callbacks: {
+                                        label: function(context) {
+                                            return '₱' + context.parsed.y.toFixed(2);
+                                        }
+                                    }
                                 }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    grid: { 
+                                        color: 'rgba(255,255,255,0.05)',
+                                        drawBorder: false
+                                    },
+                                    ticks: {
+                                        color: '#888',
+                                        font: { size: 10 },
+                                        callback: function(value) {
+                                            return '₱' + value;
+                                        }
+                                    }
+                                },
+                                x: {
+                                    grid: { 
+                                        display: false,
+                                        drawBorder: false
+                                    },
+                                    ticks: {
+                                        color: '#888',
+                                        font: { size: 10 },
+                                        maxTicksLimit: 15
+                                    }
+                                }
+                            },
+                            interaction: {
+                                intersect: false,
+                                mode: 'index'
                             }
+                        }
+                    });
+                    
+                    // Update period label
+                    const periodLabelEl = document.getElementById('chartPeriodLabel');
+                    if (periodLabelEl) {
+                        const periods = {
+                            daily: 'Daily (30 Days)',
+                            weekly: 'Weekly (12 Weeks)',
+                            monthly: 'Monthly (12 Months)'
+                        };
+                        periodLabelEl.textContent = periods[window.chartPeriod] || 'Weekly (12 Weeks)';
+                    }
+                    
+                    // Update active button
+                    document.querySelectorAll('.chart-period-btn').forEach(btn => {
+                        btn.classList.toggle('active', btn.textContent.toLowerCase() === window.chartPeriod);
+                    });
+                }
+                
+                // Function to update chart period
+                window.updateChartPeriod = function(period) {
+                    window.chartPeriod = period;
+                    appData.systemSettings.chartDefaultPeriod = period;
+                    saveToLocal();
+                    
+                    // Fetch new data
+                    const data = getChartData(period);
+                    window.chartLabels = data.labels;
+                    window.chartValues = data.data;
+                    
+                    // Update chart
+                    if (window.chartInstance) {
+                        window.chartInstance.data.labels = window.chartLabels;
+                        window.chartInstance.data.datasets[0].data = window.chartValues;
+                        window.chartInstance.update();
+                        
+                        const periodLabelEl = document.getElementById('chartPeriodLabel');
+                        if (periodLabelEl) {
+                            const periods = {
+                                daily: 'Daily (30 Days)',
+                                weekly: 'Weekly (12 Weeks)',
+                                monthly: 'Monthly (12 Months)'
+                            };
+                            periodLabelEl.textContent = periods[period] || 'Weekly (12 Weeks)';
+                        }
+                        
+                        document.querySelectorAll('.chart-period-btn').forEach(btn => {
+                            btn.classList.toggle('active', btn.textContent.toLowerCase() === period);
                         });
                     }
-                }, 100);
+                };
+                
+                // Call init after render
+                setTimeout(initChart, 100);
             <\/script>
         `;
     }
@@ -3075,12 +3279,12 @@
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.7.3</div>
+                        <div>v8.7.4</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
                     ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400 text-[10px]">🌐 Online Mode | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Offline Mode | Using local cache</div>`}
-                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Periodic reports auto-saved to Firebase</div>
+                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Interactive sales chart with Daily/Weekly/Monthly views</div>
                     ${isUsingDemoConfig ? `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Using demo Firebase config - Configure your own in System Settings</div>` : ''}
                 </div>
             </div>
@@ -3519,7 +3723,7 @@
         const appIconHtml = s.appIcon ? `<img src="${s.appIcon}" class="app-icon-preview">` : 'No app icon uploaded';
         const timeout = s.inactivityTimeout || 30;
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.3</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.4</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -3584,6 +3788,14 @@
                                 </label>
                             </div>
                             <div>
+                                <label class="text-gray-400 text-xs">Chart Default Period</label>
+                                <select class="bg-gray-800 p-1 rounded text-sm w-full" onchange="updateChartDefaultPeriod(this.value)">
+                                    <option value="daily" ${s.chartDefaultPeriod === 'daily' ? 'selected' : ''}>Daily (30 Days)</option>
+                                    <option value="weekly" ${s.chartDefaultPeriod === 'weekly' ? 'selected' : ''}>Weekly (12 Weeks)</option>
+                                    <option value="monthly" ${s.chartDefaultPeriod === 'monthly' ? 'selected' : ''}>Monthly (12 Months)</option>
+                                </select>
+                            </div>
+                            <div>
                                 <label class="text-gray-400 text-xs">Inactivity Timeout (minutes)</label>
                                 <div class="flex items-center gap-2">
                                     <input type="number" id="timeoutInput" value="${timeout}" class="bg-gray-700 p-1 rounded w-20 text-sm" min="5" max="120">
@@ -3626,13 +3838,13 @@
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.7.3 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.7.4 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
-                <div class="mt-1 text-cyan-400">📅 Today's Commission = Commission from Today's Transactions</div>
+                <div class="mt-1 text-cyan-400">📊 Interactive Sales Chart with Daily/Weekly/Monthly views</div>
                 <div class="mt-1 text-green-400">⚡ Enhanced Dashboard with Quick Stats & Activity Feed</div>
                 <div class="mt-1 text-green-400">📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🌐 Firebase: Connected (Online) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🌐 Firebase: Disconnected - Using local cache</div>`}
@@ -3649,6 +3861,16 @@
         saveToLocal();
         renderApp();
         alert(`Notifications ${checked ? 'enabled' : 'disabled'}`);
+    };
+
+    window.updateChartDefaultPeriod = (period) => {
+        appData.systemSettings.chartDefaultPeriod = period;
+        saveToLocal();
+        renderApp();
+        alert(`Chart default period set to ${period.charAt(0).toUpperCase() + period.slice(1)}`);
+        if (currentView === 'dashboard') {
+            updateChartPeriod(period);
+        }
     };
 
     window.updateTimeout = () => {
@@ -3739,7 +3961,7 @@
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.3</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.4</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -3757,7 +3979,7 @@
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
-                    <p class="text-green-400 mt-1">✅ v8.7.3: Enhanced with Activity Log & Dashboard Quick Stats</p>
+                    <p class="text-green-400 mt-1">✅ v8.7.4: Interactive Sales Chart with Daily/Weekly/Monthly views</p>
                     <p class="text-green-400 mt-1">📊 Today's Commission = Commission from Today's Transactions only</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
                     <p class="text-green-400 mt-1">⚡ Offline support - data syncs when connection is restored</p>
@@ -5984,7 +6206,7 @@
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.3</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.4</span></span>
                     </div>
                 </div>
 
@@ -6024,22 +6246,23 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.3 Enhanced | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.4 Enhanced | Interactive Chart | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.3 (Enhanced)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.4 (Enhanced)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
     console.log(`%c🌐 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Online)' : 'Disconnected (Offline)'}`, 'color: #ffaa00;');
+    console.log('%c📈 Interactive Sales Chart with Daily/Weekly/Monthly toggle views', 'color: #00d4ff;');
+    console.log('%c📊 Today\'s Commission = Commission from Today\'s Transactions only', 'color: #00ff88;');
     console.log('%c⚡ Enhanced Dashboard with Quick Stats, Activity Feed & Quick Actions', 'color: #00d4ff;');
-    console.log('%c📊 Today\'s Commission = Commission from Today\'s Transactions only (FIXED)', 'color: #00ff88;');
     console.log('%c📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase', 'color: #00d4ff;');
-    console.log('%c🔄 v8.7.3: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
+    console.log('%c🔄 v8.7.4: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
     console.log('%c👥 Customer Database with full transaction history and credit tracking', 'color: #00d4ff;');
     console.log('%c🛒 POS Panel fully functional with staff assignment, size selection, and open services', 'color: #00d4ff;');
     console.log('%c🎨 Customizable UI Labels for panels and modals', 'color: #00d4ff;');
