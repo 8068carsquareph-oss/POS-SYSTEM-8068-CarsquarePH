@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.7.2</title>
+    <title>8068 CAR SQUARE | POS System v8.7.3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -411,6 +411,29 @@
         .staff-checkbox { accent-color: #00d4ff; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .app-icon-preview { width: 48px; height: 48px; border-radius: 8px; object-fit: contain; background: #0a0a0a; border: 1px solid #333; }
+        .quick-stat-card { background: rgba(10,10,10,0.6); border: 1px solid rgba(0,212,255,0.15); border-radius: 12px; padding: 12px; transition: all 0.3s; }
+        .quick-stat-card:hover { border-color: rgba(0,212,255,0.4); transform: translateY(-2px); }
+        .quick-stat-card .icon { font-size: 24px; opacity: 0.7; }
+        .quick-stat-card .value { font-size: 22px; font-weight: 700; }
+        .quick-stat-card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.3px; }
+        .badge-success { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid rgba(0,255,136,0.2); }
+        .badge-warning { background: rgba(255,170,0,0.15); color: #ffaa00; border: 1px solid rgba(255,170,0,0.2); }
+        .badge-info { background: rgba(0,212,255,0.15); color: #00d4ff; border: 1px solid rgba(0,212,255,0.2); }
+        .badge-danger { background: rgba(255,107,107,0.15); color: #ff6b6b; border: 1px solid rgba(255,107,107,0.2); }
+        .animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
+        @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .quick-actions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+        .quick-action-btn { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; transition: all 0.2s; font-size: 12px; }
+        .quick-action-btn:hover { border-color: #00d4ff; background: #222; transform: translateY(-2px); }
+        .quick-action-btn i { font-size: 18px; display: block; margin-bottom: 4px; color: #00d4ff; }
+        .activity-feed { max-height: 300px; overflow-y: auto; }
+        .activity-item { padding: 8px 12px; border-bottom: 1px solid #1a1a1a; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+        .activity-item .time { color: #666; font-size: 11px; min-width: 60px; }
+        .activity-item .text { color: #ccc; }
+        .activity-item .text strong { color: #fff; }
+        .activity-item .badge { font-size: 9px; padding: 1px 8px; border-radius: 10px; }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 768px) { .dashboard-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body class="text-white">
@@ -682,6 +705,9 @@
                     reportsTitle: 'Reports',
                     adminTitle: 'Admin Panel'
                 };
+                if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
+                if (!appData.systemSettings.enableNotifications) appData.systemSettings.enableNotifications = true;
+                if (!appData.systemSettings.inactivityTimeout) appData.systemSettings.inactivityTimeout = 30;
                 dataLoaded = true;
                 addFirebaseLog('📂 Loaded from localStorage (cache)', 'info');
                 renderApp();
@@ -758,6 +784,7 @@
                             adminTitle: 'Admin Panel'
                         };
                     }
+                    if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
                     dataLoaded = true;
                     if (hasChanges) {
                         saveToLocal();
@@ -818,7 +845,7 @@
             commissionMatrix: appData.commissionMatrix || {},
             reports: appData.reports || { weekly: [], monthly: [], yearly: [] },
             lastUpdated: new Date().toISOString(),
-            version: '8.7.2'
+            version: '8.7.3'
         };
 
         const dataToSync = sanitizeDataForFirebase(rawData);
@@ -1017,7 +1044,10 @@
                 posTitle: 'Point of Sale',
                 reportsTitle: 'Reports',
                 adminTitle: 'Admin Panel'
-            }
+            },
+            activityLog: [],
+            enableNotifications: true,
+            inactivityTimeout: 30
         },
         users: [
             { id: 1, username: "owner", password: "owner123", role: "Owner", name: "Owner", isActive: true },
@@ -1094,6 +1124,7 @@
                     adminTitle: 'Admin Panel'
                 };
             }
+            if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
             dataLoaded = true;
         } catch(e) {}
     }
@@ -1117,6 +1148,22 @@
         if (tierPercent === 35) return values[1] || 0;
         if (tierPercent === 40) return values[2] || 0;
         return 0;
+    }
+
+    // ======================== ACTIVITY LOG ========================
+    function addActivityLog(action, details) {
+        if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
+        const entry = {
+            timestamp: new Date().toISOString(),
+            user: appData.currentUser?.name || 'System',
+            action: action,
+            details: details || ''
+        };
+        appData.systemSettings.activityLog.unshift(entry);
+        if (appData.systemSettings.activityLog.length > 100) {
+            appData.systemSettings.activityLog = appData.systemSettings.activityLog.slice(0, 100);
+        }
+        saveToLocal();
     }
 
     // ======================== STATE ========================
@@ -1143,6 +1190,7 @@
     let customerCurrentPage = 1;
     let customerPageSize = 10;
     let commissionReportPeriod = 'weekly';
+    let inactivityTimer = null;
 
     function generateReceiptNo() { return "INV-" + new Date().getFullYear() + "-" + (appData.nextIds.transaction++); }
 
@@ -1496,6 +1544,7 @@
         if(user) {
             appData.currentUser = user;
             showLogin = false;
+            addActivityLog('Login', `User ${user.name} logged in`);
             saveToLocal();
             renderApp();
             return true;
@@ -1504,6 +1553,9 @@
     }
 
     function logout() {
+        if (appData.currentUser) {
+            addActivityLog('Logout', `User ${appData.currentUser.name} logged out`);
+        }
         appData.currentUser = null;
         showLogin = true;
         renderApp();
@@ -1521,7 +1573,7 @@
                     ${appData.systemSettings.appIcon ? `<img src="${appData.systemSettings.appIcon}" class="mx-auto max-h-20 mb-4 rounded-lg">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.2</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.3</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online Mode' : 'Offline Mode'}</p>
                 </div>
@@ -1848,6 +1900,7 @@
         generatePeriodicReport('weekly');
         generatePeriodicReport('monthly');
         generatePeriodicReport('yearly');
+        addActivityLog('Sale Completed', `Transaction ${transaction.id} - ₱${total.toFixed(2)} - ${selectedPayment}`);
         alert(`✅ SALE COMPLETED!\nTotal: ₱${total.toFixed(2)}${isCredit ? '\n⚠️ CREDIT (UTANG) - PENDING PAYMENT' : ''}`);
         printReceipt(transaction);
         posCart = []; 
@@ -1886,6 +1939,7 @@
         };
         appData.openServices.push(openService);
         saveToLocal();
+        addActivityLog('Open Service Created', `${customer} - ₱${total.toFixed(2)}`);
         alert(`✅ Service saved as Open Service!\nTotal: ₱${total.toFixed(2)}`);
         posCart = [];
         selectedCustomer = null;
@@ -1907,6 +1961,7 @@
                 let newCust = { id: Date.now(), name, loyaltyPoints: 0, mobile: "", vehicleInfo: "", plate: "" }; 
                 appData.customers.push(newCust); 
                 selectedCustomer = newCust; 
+                addActivityLog('Customer Added', name);
             } 
             renderApp(); 
         }
@@ -2138,6 +2193,7 @@
             if(status === 'completed') {
                 service.completedAt = new Date().toISOString();
                 processOpenServiceCommission(service, true);
+                addActivityLog('Open Service Completed', `${service.customer} - ₱${service.total.toFixed(2)}`);
             }
             saveToLocal();
             renderApp();
@@ -2245,6 +2301,8 @@
 
     function deleteOpenService(id) {
         if(confirm("Delete this open service?")) {
+            const service = appData.openServices.find(s => s.id === id);
+            if (service) addActivityLog('Open Service Deleted', `${service.customer}`);
             appData.openServices = appData.openServices.filter(s => s.id !== id);
             saveToLocal();
             renderApp();
@@ -2367,6 +2425,7 @@
         generatePeriodicReport('weekly');
         generatePeriodicReport('monthly');
         generatePeriodicReport('yearly');
+        addActivityLog('Payment Completed', `${service.customer} - ₱${total.toFixed(2)} - ${paymentMethod}`);
         alert(`✅ Payment Completed!\nTotal: ₱${total.toFixed(2)}`);
         
         const txToPrint = appData.transactions.find(t => t.openServiceId === service.id);
@@ -2508,6 +2567,7 @@
                 loyaltyPoints: 0,
                 createdAt: new Date().toISOString()
             }); 
+            addActivityLog('Customer Added', name);
             saveToLocal(); 
             renderApp(); 
         } 
@@ -2532,6 +2592,8 @@
 
     window.deleteCustomer = (id) => {
         if(confirm("Delete this customer? This will not delete their transactions.")) {
+            const customer = appData.customers.find(c => c.id === id);
+            if (customer) addActivityLog('Customer Deleted', customer.name);
             appData.customers = appData.customers.filter(c => c.id !== id);
             saveToLocal();
             renderApp();
@@ -2698,6 +2760,8 @@
     };
     window.deleteStaffMember = (id) => {
         if(confirm("Delete this staff member?")) {
+            const staff = appData.staff.find(s => s.id === id);
+            if (staff) addActivityLog('Staff Deleted', staff.name);
             appData.staff = appData.staff.filter(s => s.id !== id);
             saveToLocal(); renderApp();
         }
@@ -2708,9 +2772,252 @@
         let tier = parseInt(prompt("Commission Tier (30, 35, 40):", "35"));
         if([30,35,40].includes(tier)) {
             appData.staff.push({ id: Date.now(), name, position: pos, contact: "", salesGenerated: 0, jobsCompleted: 0, commissionTier: tier, isActive: true, totalCommission: 0 });
+            addActivityLog('Staff Added', name);
             saveToLocal(); renderApp();
         }
     };
+
+    // ======================== ENHANCED DASHBOARD WITH QUICK STATS & ACTIVITY ========================
+    function renderDashboard() {
+        if(showLogin) return renderLogin();
+        
+        const today = new Date().toISOString().slice(0,10);
+        const todayTx = appData.transactions.filter(t => t.date.startsWith(today));
+        const weekStart = new Date();
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+        const weekStartStr = weekStart.toISOString().slice(0,10);
+        const weekTx = appData.transactions.filter(t => t.date >= weekStartStr);
+        const monthTx = appData.transactions.filter(t => new Date(t.date).getMonth() === new Date().getMonth());
+        
+        const dailySales = todayTx.reduce((s,t)=>s+t.total,0);
+        const weeklySales = weekTx.reduce((s,t)=>s+t.total,0);
+        const monthlySales = monthTx.reduce((s,t)=>s+t.total,0);
+        const dailyExpenses = appData.expenses.filter(e => e.date === today).reduce((s,e)=>s+e.amount,0);
+        
+        // TODAY'S COMMISSION - ONLY from today's transactions
+        const dailyCommission = appData.transactions
+            .filter(t => t.date.startsWith(today) && t.staffCommissions)
+            .reduce((sum, t) => sum + Object.values(t.staffCommissions).reduce((s, st) => s + (st.commission || 0), 0), 0);
+        
+        const weeklyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
+        const monthlyCommission = appData.staff.reduce((sum, s) => sum + (s.monthlyCommission || 0), 0);
+        const openCount = appData.openServices.filter(s => s.status === 'pending' || s.status === 'in-progress').length;
+        const lowStock = appData.inventory.filter(i => i.quantity <= i.reorderLevel).length;
+        const totalCredit = (appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0);
+        const totalRevenue = appData.transactions.reduce((s,t)=>s+t.total,0);
+        const totalExpenses = appData.expenses.reduce((s,e)=>s+e.amount,0);
+        const totalCommissionAll = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
+
+        const logoHtml = appData.systemSettings.companyLogo ? `<img src="${appData.systemSettings.companyLogo}" class="company-logo inline-block mr-2" alt="Logo" style="max-height:40px;">` : '';
+
+        // Activity Feed
+        const activities = (appData.systemSettings.activityLog || []).slice(0, 10);
+        const activityHtml = activities.map(a => `
+            <div class="activity-item">
+                <span class="time">${new Date(a.timestamp).toLocaleTimeString()}</span>
+                <span class="text"><strong>${a.user}</strong> ${a.action}</span>
+                ${a.details ? `<span class="text-gray-400 text-xs ml-1">${a.details}</span>` : ''}
+            </div>
+        `).join('') || '<div class="text-center text-gray-500 py-4 text-sm">No recent activity</div>';
+
+        // Quick Actions
+        const quickActions = `
+            <div class="quick-actions-grid">
+                <div class="quick-action-btn" onclick="navigate('pos')">
+                    <i class="fas fa-cash-register"></i>
+                    New Sale
+                </div>
+                <div class="quick-action-btn" onclick="navigate('openservices')">
+                    <i class="fas fa-clipboard-list"></i>
+                    Open Services
+                </div>
+                <div class="quick-action-btn" onclick="navigate('customers')">
+                    <i class="fas fa-user-plus"></i>
+                    Add Customer
+                </div>
+                <div class="quick-action-btn" onclick="navigate('admin')">
+                    <i class="fas fa-cog"></i>
+                    Settings
+                </div>
+                <div class="quick-action-btn" onclick="window.exportDailySales()">
+                    <i class="fas fa-file-export"></i>
+                    Export Today
+                </div>
+                <div class="quick-action-btn" onclick="window.printDailyTransactions()">
+                    <i class="fas fa-print"></i>
+                    Print Report
+                </div>
+            </div>
+        `;
+
+        return `
+            <div class="flex justify-between items-center mb-4">
+                <div class="flex items-center gap-3">
+                    ${logoHtml}
+                    <div>
+                        <span class="text-sm text-gray-400"><i class="fas fa-clock"></i> <span id="liveClock" class="live-clock">Loading...</span></span>
+                        <span class="text-xs text-cyan-400 ml-3">👤 ${appData.currentUser?.name} (${appData.currentUser?.role})</span>
+                        <button onclick="logout()" class="text-xs text-red-400 ml-3 hover:text-red-300"><i class="fas fa-sign-out-alt"></i> Logout</button>
+                        ${firebaseInitialized && isFirebasePrimary ? `<span class="text-xs text-green-400 ml-3"><i class="fas fa-cloud"></i> Online</span>` : `<span class="text-xs text-yellow-400 ml-3"><i class="fas fa-sync-alt"></i> Offline</span>`}
+                        ${appData.systemSettings.enableNotifications ? `<span class="text-xs text-cyan-400 ml-3"><i class="fas fa-bell"></i></span>` : ''}
+                    </div>
+                </div>
+                <div class="text-sm text-gray-400">${appData.systemSettings.businessHours}</div>
+            </div>
+            
+            <!-- Quick Stats Row -->
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-green-400"><i class="fas fa-coins"></i></div>
+                    <div class="value text-green-400">₱${dailySales.toFixed(2)}</div>
+                    <div class="label">Today's Sales</div>
+                </div>
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-purple-400"><i class="fas fa-hand-holding-usd"></i></div>
+                    <div class="value text-purple-400">₱${dailyCommission.toFixed(2)}</div>
+                    <div class="label">Today's Commission</div>
+                </div>
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-cyan-400"><i class="fas fa-calendar-week"></i></div>
+                    <div class="value text-cyan-400">₱${weeklySales.toFixed(2)}</div>
+                    <div class="label">Weekly Sales</div>
+                </div>
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-yellow-400"><i class="fas fa-calendar-alt"></i></div>
+                    <div class="value text-yellow-400">₱${monthlySales.toFixed(2)}</div>
+                    <div class="label">Monthly Sales</div>
+                </div>
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-orange-400"><i class="fas fa-hand-holding-usd"></i></div>
+                    <div class="value text-orange-400">₱${totalCredit.toFixed(2)}</div>
+                    <div class="label">Credit Outstanding</div>
+                </div>
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-red-400"><i class="fas fa-box"></i></div>
+                    <div class="value text-red-400">${lowStock}</div>
+                    <div class="label">Low Stock Items</div>
+                </div>
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-blue-400"><i class="fas fa-users"></i></div>
+                    <div class="value text-blue-400">${appData.customers.length}</div>
+                    <div class="label">Customers</div>
+                </div>
+                <div class="quick-stat-card text-center">
+                    <div class="icon text-pink-400"><i class="fas fa-clipboard-list"></i></div>
+                    <div class="value text-pink-400">${openCount}</div>
+                    <div class="label">Open Services</div>
+                </div>
+            </div>
+
+            <!-- Main Dashboard Grid -->
+            <div class="dashboard-grid">
+                <!-- Left: Sales Chart -->
+                <div class="card-premium p-5">
+                    <h3 class="text-lg font-bold mb-3"><i class="fas fa-chart-line"></i> Weekly Sales Overview</h3>
+                    <canvas id="salesChart" height="200"></canvas>
+                    <div class="flex justify-between mt-3 text-xs text-gray-500">
+                        <span>Total: ₱${weeklySales.toFixed(2)}</span>
+                        <span>${weekTx.length} transactions</span>
+                    </div>
+                </div>
+                
+                <!-- Right: Top Services & Quick Actions -->
+                <div>
+                    <div class="card-premium p-5 mb-4">
+                        <h3 class="text-lg font-bold mb-3"><i class="fas fa-star"></i> Top Services</h3>
+                        <div class="max-h-32 overflow-y-auto">
+                            ${(() => {
+                                const serviceCount = {};
+                                appData.transactions.forEach(t => { t.items.forEach(item => { serviceCount[item.serviceName] = (serviceCount[item.serviceName] || 0) + item.quantity; }); });
+                                const sortedServices = Object.entries(serviceCount).sort((a,b) => b[1] - a[1]).slice(0,5);
+                                return sortedServices.map(([name, count]) => `
+                                    <div class="flex justify-between items-center border-b border-gray-700/50 py-1">
+                                        <span class="text-sm">${name}</span>
+                                        <span class="text-sm text-cyan-400">${count} sold</span>
+                                    </div>
+                                `).join('') || '<div class="text-gray-400 text-center py-4">No service data yet</div>';
+                            })()}
+                        </div>
+                    </div>
+                    <div class="card-premium p-5">
+                        <h3 class="text-lg font-bold mb-3"><i class="fas fa-bolt"></i> Quick Actions</h3>
+                        ${quickActions}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Row: Activity Feed & Summary Stats -->
+            <div class="grid md:grid-cols-2 gap-4 mt-4">
+                <div class="card-premium p-5">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg font-bold"><i class="fas fa-history"></i> Recent Activity</h3>
+                        <span class="text-xs text-gray-500">Last ${Math.min(10, appData.systemSettings.activityLog?.length || 0)} entries</span>
+                    </div>
+                    <div class="activity-feed">
+                        ${activityHtml}
+                    </div>
+                </div>
+                <div class="card-premium p-5">
+                    <h3 class="text-lg font-bold mb-3"><i class="fas fa-chart-pie"></i> Summary</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-gray-800/50 p-3 rounded-lg text-center">
+                            <div class="text-xs text-gray-400">Total Revenue</div>
+                            <div class="text-xl font-bold text-green-400">₱${totalRevenue.toFixed(2)}</div>
+                        </div>
+                        <div class="bg-gray-800/50 p-3 rounded-lg text-center">
+                            <div class="text-xs text-gray-400">Total Expenses</div>
+                            <div class="text-xl font-bold text-red-400">₱${totalExpenses.toFixed(2)}</div>
+                        </div>
+                        <div class="bg-gray-800/50 p-3 rounded-lg text-center">
+                            <div class="text-xs text-gray-400">Total Commission</div>
+                            <div class="text-xl font-bold text-yellow-400">₱${totalCommissionAll.toFixed(2)}</div>
+                        </div>
+                        <div class="bg-gray-800/50 p-3 rounded-lg text-center">
+                            <div class="text-xs text-gray-400">Net Profit</div>
+                            <div class="text-xl font-bold text-cyan-400">₱${(totalRevenue - totalExpenses).toFixed(2)}</div>
+                        </div>
+                    </div>
+                    <div class="mt-3 flex gap-2 flex-wrap justify-center">
+                        <button onclick="navigate('admin')" class="btn-neon px-3 py-1 rounded text-sm">Manage</button>
+                        <button onclick="navigate('commission')" class="bg-purple-600 px-3 py-1 rounded text-sm"><i class="fas fa-percent"></i> Commissions</button>
+                        <button onclick="navigate('reports')" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-chart-bar"></i> Reports</button>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                setTimeout(function() {
+                    const ctx = document.getElementById('salesChart')?.getContext('2d');
+                    if(ctx) {
+                        new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+                                datasets: [{
+                                    label: 'Sales (₱)',
+                                    data: [${weekTx.slice(0,7).map(t=>t.total).join(',')}],
+                                    borderColor: '#00d4ff',
+                                    tension: 0.3,
+                                    fill: true,
+                                    backgroundColor: 'rgba(0,212,255,0.1)'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: {
+                                    legend: { display: false }
+                                },
+                                scales: {
+                                    y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+                                    x: { grid: { display: false } }
+                                }
+                            }
+                        });
+                    }
+                }, 100);
+            <\/script>
+        `;
+    }
 
     // ======================== ADMIN DASHBOARD ========================
     function renderAdminDashboard() {
@@ -2768,7 +3075,7 @@
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.7.2</div>
+                        <div>v8.7.3</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
@@ -3188,12 +3495,20 @@
         let name = prompt("Full name:") || username;
         let role = prompt("Role (Owner/Manager/Cashier/Staff):") || "Staff";
         appData.users.push({ id: Date.now(), username, password, role, name, isActive: true });
+        addActivityLog('User Added', name);
         saveToLocal(); renderApp();
     };
     window.toggleUserStatus = (id) => { let u = appData.users.find(u=>u.id===id); if(u) { u.isActive = !u.isActive; saveToLocal(); renderApp(); } };
-    window.deleteUser = (id) => { if(confirm("Delete user?")) { appData.users = appData.users.filter(u=>u.id!==id); saveToLocal(); renderApp(); } };
+    window.deleteUser = (id) => { 
+        if(confirm("Delete user?")) { 
+            const u = appData.users.find(user => user.id === id);
+            if (u) addActivityLog('User Deleted', u.name);
+            appData.users = appData.users.filter(u=>u.id!==id); 
+            saveToLocal(); renderApp(); 
+        } 
+    };
 
-    // ======================== ADMIN - SYSTEM (UPDATED WITH LOGO SIZE, APP ICON, UI LABELS) ========================
+    // ======================== ADMIN - SYSTEM (ENHANCED) ========================
     function renderAdminSystem() {
         if(showLogin) return renderLogin();
         if(!hasRole(['Owner'])) {
@@ -3202,8 +3517,9 @@
         const s = appData.systemSettings;
         const logoHtml = s.companyLogo ? `<img src="${s.companyLogo}" class="company-logo" style="max-width:120px;max-height:80px;">` : 'No logo uploaded';
         const appIconHtml = s.appIcon ? `<img src="${s.appIcon}" class="app-icon-preview">` : 'No app icon uploaded';
+        const timeout = s.inactivityTimeout || 30;
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.2</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.3</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -3256,6 +3572,27 @@
                     </div>
                     <div><label class="text-gray-400 text-sm">Business Hours</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer" onclick="editSetting('businessHours')">${s.businessHours}</div></div>
                     
+                    <!-- Enhanced Settings -->
+                    <div class="border-t border-gray-700 pt-3 mt-2">
+                        <label class="text-gray-400 text-sm font-bold">Advanced Settings</label>
+                        <div class="space-y-2 mt-2">
+                            <div class="flex items-center justify-between">
+                                <label class="text-gray-400 text-xs">Enable Notifications</label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" class="form-checkbox h-4 w-4 text-cyan-500" ${s.enableNotifications !== false ? 'checked' : ''} onchange="updateNotificationSetting(this.checked)">
+                                    <span class="ml-2 text-xs text-gray-400">${s.enableNotifications !== false ? 'ON' : 'OFF'}</span>
+                                </label>
+                            </div>
+                            <div>
+                                <label class="text-gray-400 text-xs">Inactivity Timeout (minutes)</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" id="timeoutInput" value="${timeout}" class="bg-gray-700 p-1 rounded w-20 text-sm" min="5" max="120">
+                                    <button onclick="updateTimeout()" class="bg-cyan-600 px-2 py-1 rounded text-xs"><i class="fas fa-save"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- UI Labels Section -->
                     <div class="border-t border-gray-700 pt-3 mt-2">
                         <label class="text-gray-400 text-sm font-bold">UI Customization</label>
@@ -3285,17 +3622,18 @@
                 <button onclick="exportAllData()" class="bg-green-600 p-2 rounded"><i class="fas fa-file-export"></i> Export All Data</button>
                 <button onclick="resetSystem()" class="bg-red-600 p-2 rounded"><i class="fas fa-trash"></i> Reset to Default</button>
                 ${firebaseInitialized ? `<button onclick="pullFromFirebase()" class="bg-purple-600 p-2 rounded"><i class="fas fa-cloud-download-alt"></i> Pull from Cloud</button>` : ''}
+                <button onclick="clearActivityLog()" class="bg-yellow-600 p-2 rounded"><i class="fas fa-eraser"></i> Clear Activity Log</button>
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.7.2 Optimized | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.7.3 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
-                <div class="mt-1 text-cyan-400">📅 Auto-Commission on Service Complete | Real-time Sync</div>
-                <div class="mt-1 text-green-400">⚡ Optimized performance - reduced lag and improved stability</div>
+                <div class="mt-1 text-cyan-400">📅 Today's Commission = Commission from Today's Transactions</div>
+                <div class="mt-1 text-green-400">⚡ Enhanced Dashboard with Quick Stats & Activity Feed</div>
                 <div class="mt-1 text-green-400">📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🌐 Firebase: Connected (Online) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🌐 Firebase: Disconnected - Using local cache</div>`}
                 <div class="mt-1 text-green-400">🔧 Data sanitization removes undefined values before syncing</div>
@@ -3304,6 +3642,38 @@
             </div>
         </div>`;
     }
+
+    // Enhanced Settings Functions
+    window.updateNotificationSetting = (checked) => {
+        appData.systemSettings.enableNotifications = checked;
+        saveToLocal();
+        renderApp();
+        alert(`Notifications ${checked ? 'enabled' : 'disabled'}`);
+    };
+
+    window.updateTimeout = () => {
+        const input = document.getElementById('timeoutInput');
+        if (input) {
+            const val = parseInt(input.value);
+            if (val >= 5 && val <= 120) {
+                appData.systemSettings.inactivityTimeout = val;
+                saveToLocal();
+                renderApp();
+                alert(`Inactivity timeout set to ${val} minutes`);
+            } else {
+                alert('Please enter a value between 5 and 120');
+            }
+        }
+    };
+
+    window.clearActivityLog = () => {
+        if(confirm('Clear all activity log entries?')) {
+            appData.systemSettings.activityLog = [];
+            saveToLocal();
+            renderApp();
+            alert('Activity log cleared.');
+        }
+    };
 
     // UI Label Editor
     window.editUILabel = (key) => {
@@ -3369,7 +3739,7 @@
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.2</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.3</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -3387,9 +3757,9 @@
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
-                    <p class="text-green-400 mt-1">✅ v8.7.2: Optimized performance with reduced lag</p>
+                    <p class="text-green-400 mt-1">✅ v8.7.3: Enhanced with Activity Log & Dashboard Quick Stats</p>
+                    <p class="text-green-400 mt-1">📊 Today's Commission = Commission from Today's Transactions only</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
-                    <p class="text-green-400 mt-1">📊 Periodic commission reports auto-saved to Firebase</p>
                     <p class="text-green-400 mt-1">⚡ Offline support - data syncs when connection is restored</p>
                 </div>
             </div>
@@ -3913,8 +4283,10 @@
         if (!confirm("Delete this transaction? This will remove associated commissions.")) return;
         const txIndex = appData.transactions.findIndex(t => t.id === id);
         if (txIndex === -1) return;
+        const tx = appData.transactions[txIndex];
         appData.credits = appData.credits.filter(c => c.transactionId !== id);
         appData.transactions.splice(txIndex, 1);
+        if (tx) addActivityLog('Transaction Deleted', `${tx.id} - ₱${tx.total.toFixed(2)}`);
         recalculateStaffCommissions();
         saveToLocal();
         renderApp();
@@ -4255,6 +4627,7 @@
         generatePeriodicReport('weekly');
         generatePeriodicReport('monthly');
         generatePeriodicReport('yearly');
+        addActivityLog('Manual Transaction Added', `${transaction.id} - ₱${amount.toFixed(2)}`);
         closeAdminModal();
         renderApp();
         alert("✅ Transaction added!");
@@ -4270,7 +4643,9 @@
         const dailyTx = appData.transactions.filter(t => t.date.startsWith(todayStr));
         const dailySales = dailyTx.reduce((s,t)=>s+t.total,0);
         const dailyExpenses = appData.expenses.filter(e => e.date === todayStr).reduce((s,e)=>s+e.amount,0);
-        const dailyCommission = appData.staff.reduce((sum, s) => sum + (s.dailyCommission || 0), 0);
+        const dailyCommission = appData.transactions
+            .filter(t => t.date.startsWith(todayStr) && t.staffCommissions)
+            .reduce((sum, t) => sum + Object.values(t.staffCommissions).reduce((s, st) => s + (st.commission || 0), 0), 0);
         const weekStart = new Date(today);
         weekStart.setDate(today.getDate() - today.getDay());
         const weekStartStr = weekStart.toISOString().slice(0,10);
@@ -4360,164 +4735,6 @@
                 </div>
             </div>
         </div>`;
-    }
-
-    // ======================== DASHBOARD ========================
-    function renderDashboard() {
-        if(showLogin) return renderLogin();
-        const today = new Date().toISOString().slice(0,10);
-        const todayTx = appData.transactions.filter(t => t.date.startsWith(today));
-        const weekStart = new Date();
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        const weekStartStr = weekStart.toISOString().slice(0,10);
-        const weekTx = appData.transactions.filter(t => t.date >= weekStartStr);
-        const monthTx = appData.transactions.filter(t => new Date(t.date).getMonth() === new Date().getMonth());
-        const dailySales = todayTx.reduce((s,t)=>s+t.total,0);
-        const weeklySales = weekTx.reduce((s,t)=>s+t.total,0);
-        const monthlySales = monthTx.reduce((s,t)=>s+t.total,0);
-        const dailyExpenses = appData.expenses.filter(e => e.date === today).reduce((s,e)=>s+e.amount,0);
-        // Daily commission from today's transactions only
-        const dailyCommission = appData.staff.reduce((sum, s) => sum + (s.dailyCommission || 0), 0);
-        const weeklyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
-        const monthlyCommission = appData.staff.reduce((sum, s) => sum + (s.monthlyCommission || 0), 0);
-        const openCount = appData.openServices.filter(s => s.status === 'pending' || s.status === 'in-progress').length;
-        const lowStock = appData.inventory.filter(i => i.quantity <= i.reorderLevel).length;
-        const totalCredit = (appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0);
-
-        const logoHtml = appData.systemSettings.companyLogo ? `<img src="${appData.systemSettings.companyLogo}" class="company-logo inline-block mr-2" alt="Logo" style="max-height:40px;">` : '';
-
-        return `<div class="flex justify-between items-center mb-4">
-            <div class="flex items-center gap-3">
-                ${logoHtml}
-                <div>
-                    <span class="text-sm text-gray-400"><i class="fas fa-clock"></i> <span id="liveClock" class="live-clock">Loading...</span></span>
-                    <span class="text-xs text-cyan-400 ml-3">👤 ${appData.currentUser?.name} (${appData.currentUser?.role})</span>
-                    <button onclick="logout()" class="text-xs text-red-400 ml-3 hover:text-red-300"><i class="fas fa-sign-out-alt"></i> Logout</button>
-                    ${firebaseInitialized && isFirebasePrimary ? `<span class="text-xs text-green-400 ml-3"><i class="fas fa-cloud"></i> Online</span>` : `<span class="text-xs text-yellow-400 ml-3"><i class="fas fa-sync-alt"></i> Offline</span>`}
-                </div>
-            </div>
-            <div class="text-sm text-gray-400">${appData.systemSettings.businessHours}</div>
-        </div>
-        
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-            <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
-                <div class="stat-label">Today's Sales</div>
-                <div class="stat-number text-green-400">₱${dailySales.toFixed(2)}</div>
-                <div class="text-xs text-gray-500">${todayTx.length} transactions</div>
-            </div>
-            <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
-                <div class="stat-label">Weekly Sales</div>
-                <div class="stat-number text-cyan-400">₱${weeklySales.toFixed(2)}</div>
-                <div class="text-xs text-gray-500">${weekTx.length} transactions</div>
-            </div>
-            <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
-                <div class="stat-label">Monthly Sales</div>
-                <div class="stat-number text-yellow-400">₱${monthlySales.toFixed(2)}</div>
-                <div class="text-xs text-gray-500">${monthTx.length} transactions</div>
-            </div>
-            <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
-                <div class="stat-label">Outstanding Credit</div>
-                <div class="stat-number text-orange-400">₱${totalCredit.toFixed(2)}</div>
-                <div class="text-xs text-gray-500">${(appData.credits || []).filter(c => c.balance > 0).length} accounts</div>
-            </div>
-            <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
-                <div class="stat-label">Today's Commission</div>
-                <div class="stat-number text-purple-400">₱${dailyCommission.toFixed(2)}</div>
-                <div class="text-xs text-gray-500">From ${todayTx.length} transactions</div>
-            </div>
-            <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
-                <div class="stat-label">Open Services</div>
-                <div class="stat-number text-orange-400">${openCount}</div>
-                <div class="text-xs text-gray-500">${lowStock} low stock items</div>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <div class="bg-gray-800/50 p-3 rounded-lg text-center border border-gray-700">
-                <div class="stat-label text-xs">Today's Commission</div>
-                <div class="text-lg font-bold text-purple-400">₱${dailyCommission.toFixed(2)}</div>
-            </div>
-            <div class="bg-gray-800/50 p-3 rounded-lg text-center border border-gray-700">
-                <div class="stat-label text-xs">Weekly Commission</div>
-                <div class="text-lg font-bold text-blue-400">₱${weeklyCommission.toFixed(2)}</div>
-            </div>
-            <div class="bg-gray-800/50 p-3 rounded-lg text-center border border-gray-700">
-                <div class="stat-label text-xs">Monthly Commission</div>
-                <div class="text-lg font-bold text-yellow-400">₱${monthlyCommission.toFixed(2)}</div>
-            </div>
-            <div class="bg-gray-800/50 p-3 rounded-lg text-center border border-gray-700">
-                <div class="stat-label text-xs">Total Commission</div>
-                <div class="text-lg font-bold text-green-400">₱${appData.staff.reduce((s, st) => s + (st.totalCommission || 0), 0).toFixed(2)}</div>
-            </div>
-        </div>
-
-        <div class="grid lg:grid-cols-2 gap-6">
-            <div class="card-premium p-5">
-                <h3 class="text-lg font-bold mb-3"><i class="fas fa-chart-line"></i> Sales Overview</h3>
-                <canvas id="salesChart" height="200"></canvas>
-            </div>
-            <div class="card-premium p-5">
-                <h3 class="text-lg font-bold mb-3"><i class="fas fa-star"></i> Top Services</h3>
-                <div class="max-h-48 overflow-y-auto">
-                    ${(() => {
-                        const serviceCount = {};
-                        appData.transactions.forEach(t => { t.items.forEach(item => { serviceCount[item.serviceName] = (serviceCount[item.serviceName] || 0) + item.quantity; }); });
-                        const sortedServices = Object.entries(serviceCount).sort((a,b) => b[1] - a[1]).slice(0,5);
-                        return sortedServices.map(([name, count]) => `
-                            <div class="flex justify-between items-center border-b border-gray-700/50 py-1">
-                                <span class="text-sm">${name}</span>
-                                <span class="text-sm text-cyan-400">${count} sold</span>
-                            </div>
-                        `).join('') || '<div class="text-gray-400 text-center py-4">No service data yet</div>';
-                    })()}
-                </div>
-                <div class="mt-3 flex gap-2 flex-wrap">
-                    <button onclick="navigate('admin')" class="btn-neon px-3 py-1 rounded text-sm">Manage Services</button>
-                    <button onclick="navigate('commission')" class="bg-purple-600 px-3 py-1 rounded text-sm"><i class="fas fa-percent"></i> Commissions</button>
-                </div>
-            </div>
-        </div>
-
-        <div class="mt-6 grid lg:grid-cols-4 gap-4">
-            <div class="card-premium p-4 text-center">
-                <div class="text-gray-400 text-sm">Total Revenue</div>
-                <div class="text-2xl font-bold text-green-400">₱${appData.transactions.reduce((s,t)=>s+t.total,0).toFixed(2)}</div>
-            </div>
-            <div class="card-premium p-4 text-center">
-                <div class="text-gray-400 text-sm">Total Expenses</div>
-                <div class="text-2xl font-bold text-red-400">₱${appData.expenses.reduce((s,e)=>s+e.amount,0).toFixed(2)}</div>
-            </div>
-            <div class="card-premium p-4 text-center">
-                <div class="text-gray-400 text-sm">Total Commissions</div>
-                <div class="text-2xl font-bold text-yellow-400">₱${appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0).toFixed(2)}</div>
-            </div>
-            <div class="card-premium p-4 text-center">
-                <div class="text-gray-400 text-sm">Net Profit</div>
-                <div class="text-2xl font-bold text-cyan-400">₱${(appData.transactions.reduce((s,t)=>s+t.total,0) - appData.expenses.reduce((s,e)=>s+e.amount,0)).toFixed(2)}</div>
-            </div>
-        </div>
-
-        <script>
-            setTimeout(function() {
-                const ctx = document.getElementById('salesChart')?.getContext('2d');
-                if(ctx) {
-                    new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
-                            datasets: [{
-                                label: 'Sales (₱)',
-                                data: [${weekTx.slice(0,7).map(t=>t.total).join(',')}],
-                                borderColor: '#00d4ff',
-                                tension: 0.3,
-                                fill: true,
-                                backgroundColor: 'rgba(0,212,255,0.1)'
-                            }]
-                        }
-                    });
-                }
-            }, 100);
-        <\/script>`;
     }
 
     // ======================== WEEKLY COMMISSION REPORT ========================
@@ -5028,6 +5245,8 @@
     };
     window.deleteCredit = (id) => {
         if(confirm("Delete this credit record?")) {
+            const c = appData.credits.find(cr => cr.id === id);
+            if (c) addActivityLog('Credit Deleted', `${c.customerName} - ₱${c.balance.toFixed(2)}`);
             appData.credits = appData.credits.filter(c => c.id !== id);
             saveToLocal(); renderApp();
         }
@@ -5066,6 +5285,7 @@
             date: new Date().toISOString().slice(0,10),
             status: 'pending'
         });
+        addActivityLog('Credit Added', `${customer} - ₱${amount.toFixed(2)}`);
         saveToLocal(); closeAdminModal(); renderApp();
         alert("✅ Credit record added!");
     };
@@ -5713,6 +5933,26 @@
     }
     setInterval(updateClock, 1000);
 
+    // ======================== INACTIVITY TIMER ========================
+    function resetInactivityTimer() {
+        if (inactivityTimer) {
+            clearTimeout(inactivityTimer);
+        }
+        const timeout = (appData.systemSettings.inactivityTimeout || 30) * 60 * 1000;
+        inactivityTimer = setTimeout(() => {
+            if (!showLogin && appData.currentUser) {
+                addActivityLog('Auto-Logout', `User ${appData.currentUser.name} was auto-logged out due to inactivity`);
+                alert('You have been logged out due to inactivity.');
+                logout();
+            }
+        }, timeout);
+    }
+
+    // Reset inactivity timer on user interaction
+    document.addEventListener('click', resetInactivityTimer);
+    document.addEventListener('keypress', resetInactivityTimer);
+    document.addEventListener('mousemove', resetInactivityTimer);
+
     // ======================== UI ========================
     function toggleMobileNav() {
         mobileNavOpen = !mobileNavOpen;
@@ -5728,6 +5968,7 @@
             updateFirebaseStatus('offline', 'Local Cache');
         }
         renderApp();
+        resetInactivityTimer();
     });
 
     document.body.innerHTML = `
@@ -5743,7 +5984,7 @@
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.2</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.3</span></span>
                     </div>
                 </div>
 
@@ -5763,6 +6004,7 @@
                     <span class="user-name"><i class="fas fa-user-circle"></i> ${appData.currentUser?.name || 'Guest'}</span>
                     <span class="logout-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</span>
                     <span id="syncStatus" class="sync-status"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online' : 'Offline'}</span>
+                    ${appData.systemSettings.enableNotifications !== false ? `<span class="text-cyan-400 text-xs"><i class="fas fa-bell"></i></span>` : ''}
                     <button class="mobile-nav-toggle" onclick="toggleMobileNav()"><i class="fas fa-bars"></i></button>
                 </div>
             </header>
@@ -5782,28 +6024,29 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.2 Optimized | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.3 Enhanced | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.2 (Optimized)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.3 (Enhanced)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
     console.log(`%c🌐 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Online)' : 'Disconnected (Offline)'}`, 'color: #ffaa00;');
-    console.log('%c⚡ Optimized performance - reduced lag and improved stability', 'color: #00d4ff;');
+    console.log('%c⚡ Enhanced Dashboard with Quick Stats, Activity Feed & Quick Actions', 'color: #00d4ff;');
+    console.log('%c📊 Today\'s Commission = Commission from Today\'s Transactions only (FIXED)', 'color: #00ff88;');
     console.log('%c📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase', 'color: #00d4ff;');
-    console.log('%c🔄 v8.7.2: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
+    console.log('%c🔄 v8.7.3: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
     console.log('%c👥 Customer Database with full transaction history and credit tracking', 'color: #00d4ff;');
-    console.log('%c📈 Commission data displayed on dashboard - Today\'s commission matches Today\'s transactions', 'color: #00d4ff;');
     console.log('%c🛒 POS Panel fully functional with staff assignment, size selection, and open services', 'color: #00d4ff;');
     console.log('%c🎨 Customizable UI Labels for panels and modals', 'color: #00d4ff;');
     console.log('%c🖼️ App Icon upload - replaces the black "8" on login screen', 'color: #00d4ff;');
     console.log('%c📐 Logo size adjustment for receipts and PDF reports', 'color: #00d4ff;');
-    console.log('%c📊 Credit (Utang) Management renamed to Credit Management (customizable)', 'color: #00d4ff;');
+    console.log('%c⏰ Inactivity auto-logout for security', 'color: #00d4ff;');
+    console.log('%c📋 Activity Log for tracking user actions', 'color: #00d4ff;');
     if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect online', 'color: #ff6b6b;');
     } else {
