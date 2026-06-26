@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.7.1</title>
+    <title>8068 CAR SQUARE | POS System v8.7.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -410,6 +410,7 @@
         .size-option.selected { border-color: #00d4ff; background: #00d4ff20; }
         .staff-checkbox { accent-color: #00d4ff; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .app-icon-preview { width: 48px; height: 48px; border-radius: 8px; object-fit: contain; background: #0a0a0a; border: 1px solid #333; }
     </style>
 </head>
 <body class="text-white">
@@ -672,6 +673,15 @@
                 if (!appData.systemSettings.receiptHeader) appData.systemSettings.receiptHeader = 'OFFICIAL RECEIPT';
                 if (appData.systemSettings.showVAT === undefined) appData.systemSettings.showVAT = false;
                 if (!appData.reports) appData.reports = { weekly: [], monthly: [], yearly: [] };
+                if (!appData.systemSettings.logoSize) appData.systemSettings.logoSize = 80;
+                if (!appData.systemSettings.appIcon) appData.systemSettings.appIcon = null;
+                if (!appData.systemSettings.uiLabels) appData.systemSettings.uiLabels = {
+                    creditManagement: 'Credit Management',
+                    dashboardTitle: 'Dashboard',
+                    posTitle: 'Point of Sale',
+                    reportsTitle: 'Reports',
+                    adminTitle: 'Admin Panel'
+                };
                 dataLoaded = true;
                 addFirebaseLog('📂 Loaded from localStorage (cache)', 'info');
                 renderApp();
@@ -738,6 +748,16 @@
                         appData.reports = data.reports;
                         hasChanges = true;
                     }
+                    if (!appData.systemSettings.logoSize) appData.systemSettings.logoSize = 80;
+                    if (!appData.systemSettings.uiLabels) {
+                        appData.systemSettings.uiLabels = {
+                            creditManagement: 'Credit Management',
+                            dashboardTitle: 'Dashboard',
+                            posTitle: 'Point of Sale',
+                            reportsTitle: 'Reports',
+                            adminTitle: 'Admin Panel'
+                        };
+                    }
                     dataLoaded = true;
                     if (hasChanges) {
                         saveToLocal();
@@ -798,7 +818,7 @@
             commissionMatrix: appData.commissionMatrix || {},
             reports: appData.reports || { weekly: [], monthly: [], yearly: [] },
             lastUpdated: new Date().toISOString(),
-            version: '8.7.1'
+            version: '8.7.2'
         };
 
         const dataToSync = sanitizeDataForFirebase(rawData);
@@ -985,10 +1005,19 @@
             timezone: "Asia/Manila",
             businessHours: "Mon-Sat 8:00 AM - 7:00 PM",
             companyLogo: null,
+            logoSize: 80,
+            appIcon: null,
             defaultPaymentMethods: ['Cash', 'GCash', 'Maya', 'Credit Card', 'Bank Transfer', 'Credit (Utang)'],
             receiptSize: '58mm',
             receiptHeader: 'OFFICIAL RECEIPT',
-            showVAT: false
+            showVAT: false,
+            uiLabels: {
+                creditManagement: 'Credit Management',
+                dashboardTitle: 'Dashboard',
+                posTitle: 'Point of Sale',
+                reportsTitle: 'Reports',
+                adminTitle: 'Admin Panel'
+            }
         },
         users: [
             { id: 1, username: "owner", password: "owner123", role: "Owner", name: "Owner", isActive: true },
@@ -1055,6 +1084,16 @@
             if (!appData.systemSettings.receiptHeader) appData.systemSettings.receiptHeader = 'OFFICIAL RECEIPT';
             if (appData.systemSettings.showVAT === undefined) appData.systemSettings.showVAT = false;
             if (!appData.reports) appData.reports = { weekly: [], monthly: [], yearly: [] };
+            if (!appData.systemSettings.logoSize) appData.systemSettings.logoSize = 80;
+            if (!appData.systemSettings.uiLabels) {
+                appData.systemSettings.uiLabels = {
+                    creditManagement: 'Credit Management',
+                    dashboardTitle: 'Dashboard',
+                    posTitle: 'Point of Sale',
+                    reportsTitle: 'Reports',
+                    adminTitle: 'Admin Panel'
+                };
+            }
             dataLoaded = true;
         } catch(e) {}
     }
@@ -1294,13 +1333,14 @@
         return true;
     }
 
-    function generatePDF(data, columns, title, filename, logo) {
+    function generatePDF(data, columns, title, filename, logo, logoSize) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('landscape', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
+        const size = logoSize || 80;
         if (logo) {
             try {
-                doc.addImage(logo, 'JPEG', pageWidth/2 - 20, 5, 40, 20);
+                doc.addImage(logo, 'JPEG', pageWidth/2 - size/2, 5, size, size/2);
             } catch(e) {}
         }
         doc.setFontSize(16);
@@ -1339,7 +1379,7 @@
         ];
         const formatted = data.map(t => ({ ...t, date: new Date(t.date).toLocaleString(), total: `₱${t.total.toFixed(2)}` }));
         generateExcel(formatted, columns, 'Daily Sales', 'daily_sales');
-        generatePDF(formatted, columns, 'Daily Sales Report', 'daily_sales', appData.systemSettings.companyLogo);
+        generatePDF(formatted, columns, 'Daily Sales Report', 'daily_sales', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
         generateCSV(formatted, columns, 'daily_sales');
     };
 
@@ -1362,7 +1402,7 @@
             { key: 'commission', header: 'Commission' }
         ];
         generateExcel(data, columns, 'Commission Report', 'commission_report');
-        generatePDF(data, columns, 'Commission Report', 'commission_report', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Commission Report', 'commission_report', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
         generateCSV(data, columns, 'commission_report');
     };
 
@@ -1371,7 +1411,7 @@
         const receiptSize = size || appData.systemSettings.receiptSize || '58mm';
         const printWindow = window.open('', '_blank');
         const logoHtml = appData.systemSettings.companyLogo ? 
-            `<div class="center"><img src="${appData.systemSettings.companyLogo}" style="max-width:80px;max-height:50px;object-fit:contain;"></div>` : '';
+            `<div class="center"><img src="${appData.systemSettings.companyLogo}" style="max-width:${appData.systemSettings.logoSize || 80}px;max-height:${(appData.systemSettings.logoSize || 80)/2}px;object-fit:contain;"></div>` : '';
         const receiptClass = receiptSize === '80mm' ? 'receipt-80mm' : 'receipt-58mm';
         
         printWindow.document.write(`<!DOCTYPE html>
@@ -1391,7 +1431,7 @@
                 .header-text { font-size: ${receiptSize === '80mm' ? '16px' : '14px'}; font-weight: bold; }
                 .sub-text { font-size: ${receiptSize === '80mm' ? '11px' : '10px'}; }
                 .thankyou { font-size: ${receiptSize === '80mm' ? '14px' : '12px'}; font-weight: bold; margin-top: 6px; }
-                img { max-width: ${receiptSize === '80mm' ? '100px' : '80px'}; max-height: ${receiptSize === '80mm' ? '60px' : '50px'}; object-fit: contain; }
+                img { max-width: ${appData.systemSettings.logoSize || 80}px; max-height: ${(appData.systemSettings.logoSize || 80)/2}px; object-fit: contain; }
                 @media print { body { margin: 0; padding: 0; } .${receiptClass} { width: ${receiptSize === '80mm' ? '80mm' : '58mm'}; padding: ${receiptSize === '80mm' ? '8px' : '4px'}; } }
             </style>
         </head>
@@ -1478,10 +1518,10 @@
         return `<div class="min-h-screen flex items-center justify-center">
             <div class="card-premium p-8 max-w-md w-full">
                 <div class="text-center mb-6">
-                    ${appData.systemSettings.companyLogo ? `<img src="${appData.systemSettings.companyLogo}" class="mx-auto max-h-20 mb-4">` : ''}
+                    ${appData.systemSettings.appIcon ? `<img src="${appData.systemSettings.appIcon}" class="mx-auto max-h-20 mb-4 rounded-lg">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.1</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.2</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online Mode' : 'Offline Mode'}</p>
                 </div>
@@ -1932,7 +1972,7 @@
                 <!-- Left: Service Menu -->
                 <div class="lg:col-span-2 card-premium p-5 max-h-[75vh] overflow-y-auto">
                     <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-2xl font-bold neon-glow p-2 rounded">Service Menu</h2>
+                        <h2 class="text-2xl font-bold neon-glow p-2 rounded">${appData.systemSettings.uiLabels.posTitle || 'Service Menu'}</h2>
                         <span class="text-sm text-gray-400">${activeServices.length} services</span>
                     </div>
                     ${servicesHtml}
@@ -2687,7 +2727,7 @@
             { id: 'dashboard', icon: 'fa-tachometer-alt', label: 'Dashboard' },
             { id: 'commission', icon: 'fa-percent', label: 'Commission Reports' },
             { id: 'weeklycommission', icon: 'fa-calendar-week', label: 'Weekly Commission' },
-            { id: 'credit', icon: 'fa-hand-holding-usd', label: 'Credit (Utang)' },
+            { id: 'credit', icon: 'fa-hand-holding-usd', label: appData.systemSettings.uiLabels.creditManagement || 'Credit Management' },
             { id: 'services', icon: 'fa-concierge-bell', label: 'Services' },
             { id: 'categories', icon: 'fa-tags', label: 'Categories' },
             { id: 'staff', icon: 'fa-users', label: 'Staff' },
@@ -2718,7 +2758,7 @@
 
         return `<div class="admin-grid">
             <div class="admin-sidebar">
-                <h3 class="text-lg font-bold mb-4 neon-glow p-2 rounded text-center"><i class="fas fa-crown"></i> Admin Panel</h3>
+                <h3 class="text-lg font-bold mb-4 neon-glow p-2 rounded text-center"><i class="fas fa-crown"></i> ${appData.systemSettings.uiLabels.adminTitle || 'Admin Panel'}</h3>
                 ${adminPanels.map(p => `<div class="admin-sidebar-item ${currentAdminPanel === p.id ? 'active' : ''}" onclick="navigateAdmin('${p.id}')"><i class="fas ${p.icon}"></i> ${p.label}</div>`).join('')}
                 <div class="mt-6 p-3 bg-gray-800 rounded-lg text-xs">
                     <div class="text-gray-400">System Status</div>
@@ -2728,7 +2768,7 @@
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.7.1</div>
+                        <div>v8.7.2</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
@@ -3153,7 +3193,7 @@
     window.toggleUserStatus = (id) => { let u = appData.users.find(u=>u.id===id); if(u) { u.isActive = !u.isActive; saveToLocal(); renderApp(); } };
     window.deleteUser = (id) => { if(confirm("Delete user?")) { appData.users = appData.users.filter(u=>u.id!==id); saveToLocal(); renderApp(); } };
 
-    // ======================== ADMIN - SYSTEM ========================
+    // ======================== ADMIN - SYSTEM (UPDATED WITH LOGO SIZE, APP ICON, UI LABELS) ========================
     function renderAdminSystem() {
         if(showLogin) return renderLogin();
         if(!hasRole(['Owner'])) {
@@ -3161,8 +3201,9 @@
         }
         const s = appData.systemSettings;
         const logoHtml = s.companyLogo ? `<img src="${s.companyLogo}" class="company-logo" style="max-width:120px;max-height:80px;">` : 'No logo uploaded';
+        const appIconHtml = s.appIcon ? `<img src="${s.appIcon}" class="app-icon-preview">` : 'No app icon uploaded';
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.1</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.2</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -3170,6 +3211,21 @@
                             <div class="border border-gray-600 p-2 rounded">${logoHtml}</div>
                             <button onclick="uploadLogo()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-upload"></i> Upload</button>
                             <button onclick="removeLogo()" class="bg-red-600 px-3 py-1 rounded text-sm"><i class="fas fa-times"></i> Remove</button>
+                        </div>
+                    </div>
+                    <div><label class="text-gray-400 text-sm">Logo Size (px)</label>
+                        <div class="flex items-center gap-3 bg-gray-800 p-2 rounded">
+                            <input type="number" id="logoSizeInput" value="${s.logoSize || 80}" class="bg-gray-700 p-2 rounded w-24" min="20" max="200">
+                            <button onclick="updateLogoSize()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-save"></i> Update</button>
+                            <span class="text-xs text-gray-400">Affects receipts & PDF reports</span>
+                        </div>
+                    </div>
+                    <div><label class="text-gray-400 text-sm">App Icon</label>
+                        <div class="flex items-center gap-3 bg-gray-800 p-3 rounded flex-wrap">
+                            <div class="border border-gray-600 p-2 rounded">${appIconHtml}</div>
+                            <button onclick="uploadAppIcon()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-upload"></i> Upload</button>
+                            <button onclick="removeAppIcon()" class="bg-red-600 px-3 py-1 rounded text-sm"><i class="fas fa-times"></i> Remove</button>
+                            <span class="text-xs text-gray-400 ml-2">Shown on login screen</span>
                         </div>
                     </div>
                     <div><label class="text-gray-400 text-sm">Company Name</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer" onclick="editSetting('companyName')">${s.companyName}</div></div>
@@ -3199,6 +3255,19 @@
                         </label>
                     </div>
                     <div><label class="text-gray-400 text-sm">Business Hours</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer" onclick="editSetting('businessHours')">${s.businessHours}</div></div>
+                    
+                    <!-- UI Labels Section -->
+                    <div class="border-t border-gray-700 pt-3 mt-2">
+                        <label class="text-gray-400 text-sm font-bold">UI Customization</label>
+                        <div class="space-y-2 mt-2">
+                            <div><label class="text-gray-400 text-xs">Dashboard Title</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer text-sm" onclick="editUILabel('dashboardTitle')">${s.uiLabels?.dashboardTitle || 'Dashboard'}</div></div>
+                            <div><label class="text-gray-400 text-xs">POS Title</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer text-sm" onclick="editUILabel('posTitle')">${s.uiLabels?.posTitle || 'Point of Sale'}</div></div>
+                            <div><label class="text-gray-400 text-xs">Reports Title</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer text-sm" onclick="editUILabel('reportsTitle')">${s.uiLabels?.reportsTitle || 'Reports'}</div></div>
+                            <div><label class="text-gray-400 text-xs">Admin Panel Title</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer text-sm" onclick="editUILabel('adminTitle')">${s.uiLabels?.adminTitle || 'Admin Panel'}</div></div>
+                            <div><label class="text-gray-400 text-xs">Credit Management Title</label><div class="editable-field bg-gray-800 p-2 rounded cursor-pointer text-sm" onclick="editUILabel('creditManagement')">${s.uiLabels?.creditManagement || 'Credit Management'}</div></div>
+                        </div>
+                    </div>
+                    
                     <div><label class="text-gray-400 text-sm mt-2">Firebase</label>
                         <div class="flex gap-2 flex-wrap">
                             <button onclick="showFirebaseConfig()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-database"></i> Configure Firebase</button>
@@ -3219,7 +3288,7 @@
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.7.1 Stable | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.7.2 Optimized | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
@@ -3230,16 +3299,77 @@
                 <div class="mt-1 text-green-400">📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🌐 Firebase: Connected (Online) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🌐 Firebase: Disconnected - Using local cache</div>`}
                 <div class="mt-1 text-green-400">🔧 Data sanitization removes undefined values before syncing</div>
+                <div class="mt-1 text-cyan-400">🎨 Customizable UI Labels for panels and modals</div>
                 ${isUsingDemoConfig ? `<div class="mt-1 text-yellow-400">⚠️ Using demo Firebase config. Configure your own for data persistence.</div>` : ''}
             </div>
         </div>`;
     }
 
+    // UI Label Editor
+    window.editUILabel = (key) => {
+        const labels = appData.systemSettings.uiLabels || {};
+        const current = labels[key] || '';
+        const newVal = prompt(`Edit ${key}:`, current);
+        if (newVal !== null) {
+            labels[key] = newVal;
+            appData.systemSettings.uiLabels = labels;
+            saveToLocal();
+            renderApp();
+            alert(`✅ UI Label "${key}" updated to "${newVal}"`);
+        }
+    };
+
+    // Logo Size Update
+    window.updateLogoSize = () => {
+        const input = document.getElementById('logoSizeInput');
+        if (input) {
+            const val = parseInt(input.value);
+            if (val >= 20 && val <= 200) {
+                appData.systemSettings.logoSize = val;
+                saveToLocal();
+                renderApp();
+                alert(`✅ Logo size updated to ${val}px`);
+            } else {
+                alert('Please enter a value between 20 and 200');
+            }
+        }
+    };
+
+    // App Icon Upload
+    window.uploadAppIcon = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    appData.systemSettings.appIcon = event.target.result;
+                    saveToLocal();
+                    renderApp();
+                    alert('App icon uploaded successfully!');
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+        input.click();
+    };
+
+    window.removeAppIcon = function() {
+        if(confirm('Remove app icon?')) {
+            appData.systemSettings.appIcon = null;
+            saveToLocal();
+            renderApp();
+            alert('App icon removed.');
+        }
+    };
+
     // ======================== FIREBASE CONFIG MODAL ========================
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.1</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.2</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -3257,7 +3387,7 @@
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
-                    <p class="text-green-400 mt-1">✅ v8.7.1: Optimized performance with reduced lag</p>
+                    <p class="text-green-400 mt-1">✅ v8.7.2: Optimized performance with reduced lag</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
                     <p class="text-green-400 mt-1">📊 Periodic commission reports auto-saved to Firebase</p>
                     <p class="text-green-400 mt-1">⚡ Offline support - data syncs when connection is restored</p>
@@ -3891,7 +4021,7 @@
             { key: 'total', header: 'Total' },
             { key: 'payment', header: 'Payment' }
         ];
-        generatePDF(data, columns, 'Daily Transactions Report', 'daily_transactions', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Daily Transactions Report', 'daily_transactions', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
     window.exportDailyCSV = function() {
         const today = new Date().toISOString().slice(0,10);
@@ -4018,7 +4148,7 @@
             { key: 'total', header: 'Total' },
             { key: 'payment', header: 'Payment' }
         ];
-        generatePDF(data, columns, `Transaction Tracking (${transactionFilter})`, `transactions_${transactionFilter}`, appData.systemSettings.companyLogo);
+        generatePDF(data, columns, `Transaction Tracking (${transactionFilter})`, `transactions_${transactionFilter}`, appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
     window.exportTransactionCSV = function() {
         const now = new Date();
@@ -4159,7 +4289,7 @@
         
         return `<div class="grid lg:grid-cols-2 gap-6">
             <div class="card-premium p-6">
-                <h2 class="text-2xl font-bold mb-4"><i class="fas fa-chart-line"></i> Report Summaries</h2>
+                <h2 class="text-2xl font-bold mb-4"><i class="fas fa-chart-line"></i> ${appData.systemSettings.uiLabels.reportsTitle || 'Report Summaries'}</h2>
                 <div class="flex gap-2 mb-4 flex-wrap">
                     <button onclick="setReportPeriod('daily')" class="px-3 py-1 rounded ${reportPeriod === 'daily' ? 'bg-cyan-600' : 'bg-gray-700'} text-sm">Daily</button>
                     <button onclick="setReportPeriod('weekly')" class="px-3 py-1 rounded ${reportPeriod === 'weekly' ? 'bg-cyan-600' : 'bg-gray-700'} text-sm">Weekly</button>
@@ -4246,6 +4376,7 @@
         const weeklySales = weekTx.reduce((s,t)=>s+t.total,0);
         const monthlySales = monthTx.reduce((s,t)=>s+t.total,0);
         const dailyExpenses = appData.expenses.filter(e => e.date === today).reduce((s,e)=>s+e.amount,0);
+        // Daily commission from today's transactions only
         const dailyCommission = appData.staff.reduce((sum, s) => sum + (s.dailyCommission || 0), 0);
         const weeklyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
         const monthlyCommission = appData.staff.reduce((sum, s) => sum + (s.monthlyCommission || 0), 0);
@@ -4292,7 +4423,7 @@
             <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
                 <div class="stat-label">Today's Commission</div>
                 <div class="stat-number text-purple-400">₱${dailyCommission.toFixed(2)}</div>
-                <div class="text-xs text-gray-500">${appData.staff.length} staff</div>
+                <div class="text-xs text-gray-500">From ${todayTx.length} transactions</div>
             </div>
             <div class="stat-card text-center bg-gray-800 p-3 rounded-lg">
                 <div class="stat-label">Open Services</div>
@@ -4690,7 +4821,7 @@
             { key: 'commission', header: 'Commission' }
         ];
         generateExcel(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission Report`, `${period}_commission`);
-        generatePDF(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission Report`, `${period}_commission`, appData.systemSettings.companyLogo);
+        generatePDF(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission Report`, `${period}_commission`, appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
         generateCSV(data, columns, `${period}_commission`);
     };
 
@@ -4726,7 +4857,7 @@
         return `<div class="card-premium p-6">
             <div class="flex justify-between items-center mb-4">
                 <div>
-                    <h2 class="text-2xl font-bold"><i class="fas fa-hand-holding-usd"></i> Credit (Utang) Management</h2>
+                    <h2 class="text-2xl font-bold"><i class="fas fa-hand-holding-usd"></i> ${appData.systemSettings.uiLabels.creditManagement || 'Credit Management'}</h2>
                     <p class="text-sm text-gray-400">Total Outstanding: <span class="text-red-400 font-bold">₱${totalCredit.toFixed(2)}</span></p>
                 </div>
                 <div class="flex gap-2 flex-wrap">
@@ -4811,7 +4942,7 @@
             { key: 'date', header: 'Date' },
             { key: 'status', header: 'Status' }
         ];
-        generatePDF(data, columns, 'Credit Report', 'credit_report', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Credit Report', 'credit_report', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
 
     window.exportCreditCSV = function() {
@@ -5072,7 +5203,7 @@
             { key: 'sales', header: 'Sales' },
             { key: 'commission', header: 'Commission' }
         ];
-        generatePDF(data, columns, 'Commission Report', 'commission_report', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Commission Report', 'commission_report', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
     window.exportOpenServices = function() {
         const data = appData.openServices.filter(s => s.status === 'pending' || s.status === 'in-progress').map(s => ({
@@ -5094,7 +5225,7 @@
             { key: 'createdAt', header: 'Date Created' }
         ];
         generateExcel(data, columns, 'Open Services', 'open_services');
-        generatePDF(data, columns, 'Open Services Report', 'open_services', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Open Services Report', 'open_services', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
         generateCSV(data, columns, 'open_services');
     };
     window.printOpenServices = function() {
@@ -5133,7 +5264,7 @@
             { key: 'points', header: 'Loyalty Points' }
         ];
         generateExcel(data, columns, 'Customers', 'customers');
-        generatePDF(data, columns, 'Customer Database', 'customers', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Customer Database', 'customers', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
         generateCSV(data, columns, 'customers');
     };
     window.exportStaffCSV = () => {
@@ -5304,7 +5435,7 @@
             { key: 'metric', header: 'Metric' },
             { key: 'amount', header: 'Amount' }
         ];
-        generatePDF(data, columns, 'Report Summary', 'report_summary', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Report Summary', 'report_summary', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
     window.exportWeeklyCommissionExcel = function() {
         recalculateStaffCommissions();
@@ -5428,7 +5559,7 @@
             { key: 'part2', header: 'Wed-Sat' },
             { key: 'total', header: 'Grand Total' }
         ];
-        generatePDF(data, columns, 'Weekly Commission Report', 'weekly_commission', appData.systemSettings.companyLogo);
+        generatePDF(data, columns, 'Weekly Commission Report', 'weekly_commission', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
     window.exportWeeklyCommissionCSV = function() {
         recalculateStaffCommissions();
@@ -5612,7 +5743,7 @@
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.1</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.2</span></span>
                     </div>
                 </div>
 
@@ -5651,24 +5782,28 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.1 Optimized | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.2 Optimized | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.1 (Optimized)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.2 (Optimized)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
     console.log(`%c🌐 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Online)' : 'Disconnected (Offline)'}`, 'color: #ffaa00;');
     console.log('%c⚡ Optimized performance - reduced lag and improved stability', 'color: #00d4ff;');
     console.log('%c📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase', 'color: #00d4ff;');
-    console.log('%c🔄 v8.7.1: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
+    console.log('%c🔄 v8.7.2: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
     console.log('%c👥 Customer Database with full transaction history and credit tracking', 'color: #00d4ff;');
-    console.log('%c📈 Commission data displayed on dashboard and detailed reports', 'color: #00d4ff;');
+    console.log('%c📈 Commission data displayed on dashboard - Today\'s commission matches Today\'s transactions', 'color: #00d4ff;');
     console.log('%c🛒 POS Panel fully functional with staff assignment, size selection, and open services', 'color: #00d4ff;');
+    console.log('%c🎨 Customizable UI Labels for panels and modals', 'color: #00d4ff;');
+    console.log('%c🖼️ App Icon upload - replaces the black "8" on login screen', 'color: #00d4ff;');
+    console.log('%c📐 Logo size adjustment for receipts and PDF reports', 'color: #00d4ff;');
+    console.log('%c📊 Credit (Utang) Management renamed to Credit Management (customizable)', 'color: #00d4ff;');
     if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect online', 'color: #ff6b6b;');
     } else {
