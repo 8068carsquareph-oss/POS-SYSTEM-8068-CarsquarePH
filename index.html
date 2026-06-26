@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.7.4</title>
+    <title>8068 CAR SQUARE | POS System v8.7.5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -447,6 +447,20 @@
         .trend-up { color: #00ff88; }
         .trend-down { color: #ff6b6b; }
         .trend-neutral { color: #ffaa00; }
+        /* New Admin Panel Styles */
+        .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .panel-card { background: rgba(10,10,10,0.6); border: 1px solid rgba(0,212,255,0.12); border-radius: 12px; padding: 16px; transition: all 0.3s; }
+        .panel-card:hover { border-color: rgba(0,212,255,0.3); }
+        .panel-card .panel-title { font-size: 14px; font-weight: 600; color: #00d4ff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .panel-card .panel-title i { font-size: 16px; }
+        .panel-card .panel-content { font-size: 13px; }
+        .panel-card .panel-content .stat-item { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .panel-card .panel-content .stat-item:last-child { border-bottom: none; }
+        .panel-card .panel-content .stat-value { font-weight: 600; color: #00d4ff; }
+        .panel-card .panel-content .stat-value.green { color: #00ff88; }
+        .panel-card .panel-content .stat-value.yellow { color: #ffaa00; }
+        .panel-card .panel-content .stat-value.purple { color: #a78bfa; }
+        @media (max-width: 768px) { .panel-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body class="text-white">
@@ -862,7 +876,7 @@
             commissionMatrix: appData.commissionMatrix || {},
             reports: appData.reports || { weekly: [], monthly: [], yearly: [] },
             lastUpdated: new Date().toISOString(),
-            version: '8.7.4'
+            version: '8.7.5'
         };
 
         const dataToSync = sanitizeDataForFirebase(rawData);
@@ -1187,7 +1201,7 @@
 
     // ======================== STATE ========================
     let currentView = "pos";
-    let currentAdminPanel = "customers";
+    let currentAdminPanel = "dailytransactions"; // Changed default to Daily Transactions
     let posCart = [];
     let selectedCustomer = null;
     let vehicleInfo = { plate: "", model: "", size: "Medium" };
@@ -1592,7 +1606,7 @@
                     ${appData.systemSettings.appIcon ? `<img src="${appData.systemSettings.appIcon}" class="mx-auto max-h-20 mb-4 rounded-lg">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.4</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.5</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online Mode' : 'Offline Mode'}</p>
                 </div>
@@ -3223,7 +3237,7 @@
         `;
     }
 
-    // ======================== ADMIN DASHBOARD ========================
+    // ======================== ADMIN DASHBOARD - REORGANIZED PANELS ========================
     function renderAdminDashboard() {
         if(showLogin) return renderLogin();
         if(!hasRole(['Owner', 'Manager'])) {
@@ -3231,14 +3245,14 @@
         }
 
         const adminPanels = [
-            { id: 'customers', icon: 'fa-user-friends', label: 'Customers' },
             { id: 'dailytransactions', icon: 'fa-calendar-day', label: 'Daily Transactions' },
+            { id: 'weeklycommission', icon: 'fa-calendar-week', label: 'Weekly Commission Report' },
             { id: 'transactiontracking', icon: 'fa-exchange-alt', label: 'Transaction Tracking' },
             { id: 'reports', icon: 'fa-chart-pie', label: 'Report Summaries' },
             { id: 'dashboard', icon: 'fa-tachometer-alt', label: 'Dashboard' },
             { id: 'commission', icon: 'fa-percent', label: 'Commission Reports' },
-            { id: 'weeklycommission', icon: 'fa-calendar-week', label: 'Weekly Commission' },
             { id: 'credit', icon: 'fa-hand-holding-usd', label: appData.systemSettings.uiLabels.creditManagement || 'Credit Management' },
+            { id: 'customers', icon: 'fa-user-friends', label: 'Customers' },
             { id: 'services', icon: 'fa-concierge-bell', label: 'Services' },
             { id: 'categories', icon: 'fa-tags', label: 'Categories' },
             { id: 'staff', icon: 'fa-users', label: 'Staff' },
@@ -3250,14 +3264,14 @@
         ];
 
         let content = '';
-        if(currentAdminPanel === 'customers') content = renderCustomers();
-        else if(currentAdminPanel === 'dailytransactions') content = renderDailyTransactionManagement();
+        if(currentAdminPanel === 'dailytransactions') content = renderDailyTransactionManagement();
+        else if(currentAdminPanel === 'weeklycommission') content = renderWeeklyCommissionReport();
         else if(currentAdminPanel === 'transactiontracking') content = renderTransactionTracking();
         else if(currentAdminPanel === 'reports') content = renderReportSummaries();
         else if(currentAdminPanel === 'dashboard') content = renderDashboard();
         else if(currentAdminPanel === 'commission') content = renderCommissionReports();
-        else if(currentAdminPanel === 'weeklycommission') content = renderWeeklyCommissionReport();
         else if(currentAdminPanel === 'credit') content = renderCreditManagement();
+        else if(currentAdminPanel === 'customers') content = renderCustomers();
         else if(currentAdminPanel === 'services') content = renderAdminServices();
         else if(currentAdminPanel === 'categories') content = renderAdminCategories();
         else if(currentAdminPanel === 'staff') content = renderStaffDashboard();
@@ -3279,12 +3293,12 @@
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.7.4</div>
+                        <div>v8.7.5</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
                     ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400 text-[10px]">🌐 Online Mode | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Offline Mode | Using local cache</div>`}
-                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Interactive sales chart with Daily/Weekly/Monthly views</div>
+                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Weekly Commission auto-calculated from daily transactions</div>
                     ${isUsingDemoConfig ? `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Using demo Firebase config - Configure your own in System Settings</div>` : ''}
                 </div>
             </div>
@@ -3723,7 +3737,7 @@
         const appIconHtml = s.appIcon ? `<img src="${s.appIcon}" class="app-icon-preview">` : 'No app icon uploaded';
         const timeout = s.inactivityTimeout || 30;
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.4</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.5</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -3838,14 +3852,15 @@
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.7.4 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.7.5 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
-                <div class="mt-1 text-cyan-400">📊 Interactive Sales Chart with Daily/Weekly/Monthly views</div>
-                <div class="mt-1 text-green-400">⚡ Enhanced Dashboard with Quick Stats & Activity Feed</div>
+                <div class="mt-1 text-cyan-400">📊 Weekly Commission auto-calculated from daily transactions</div>
+                <div class="mt-1 text-green-400">⚡ Daily Transactions and Weekly Commission now in Admin Panel</div>
+                <div class="mt-1 text-cyan-400">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</div>
                 <div class="mt-1 text-green-400">📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🌐 Firebase: Connected (Online) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🌐 Firebase: Disconnected - Using local cache</div>`}
                 <div class="mt-1 text-green-400">🔧 Data sanitization removes undefined values before syncing</div>
@@ -3961,7 +3976,7 @@
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.4</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.5</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -3979,8 +3994,9 @@
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
-                    <p class="text-green-400 mt-1">✅ v8.7.4: Interactive Sales Chart with Daily/Weekly/Monthly views</p>
-                    <p class="text-green-400 mt-1">📊 Today's Commission = Commission from Today's Transactions only</p>
+                    <p class="text-green-400 mt-1">✅ v8.7.5: Reorganized Admin Panel with Daily Transactions & Weekly Commission</p>
+                    <p class="text-green-400 mt-1">📊 Weekly Commission auto-calculated from daily transactions</p>
+                    <p class="text-green-400 mt-1">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
                     <p class="text-green-400 mt-1">⚡ Offline support - data syncs when connection is restored</p>
                 </div>
@@ -4087,7 +4103,7 @@
         }
     };
 
-    // ======================== TRANSACTION MANAGEMENT ========================
+    // ======================== DAILY TRANSACTION MANAGEMENT ========================
     function renderDailyTransactionManagement() {
         if(showLogin) return renderLogin();
         recalculateStaffCommissions();
@@ -4228,6 +4244,157 @@
         </div>`;
     }
 
+    // ======================== WEEKLY COMMISSION REPORT - MOVED TO ADMIN PANEL ========================
+    function renderWeeklyCommissionReport() {
+        if(showLogin) return renderLogin();
+        recalculateStaffCommissions();
+
+        const now = new Date();
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - now.getDay());
+        const weekStartStr = currentWeekStart.toISOString().slice(0,10);
+        const weekEnd = new Date(currentWeekStart);
+        weekEnd.setDate(currentWeekStart.getDate() + 6);
+        const weekEndStr = weekEnd.toISOString().slice(0,10);
+
+        const weekTx = appData.transactions.filter(t => t.date >= weekStartStr && t.date <= weekEndStr);
+        
+        const weekStaffMap = {};
+        appData.staff.forEach(s => {
+            weekStaffMap[s.id] = {
+                name: s.name,
+                position: s.position,
+                tier: s.commissionTier,
+                jobs: 0,
+                sales: 0,
+                sunday: 0, monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0, saturday: 0,
+                total: 0,
+                part1: 0,
+                part2: 0
+            };
+        });
+
+        weekTx.forEach(t => {
+            if (t.staffCommissions) {
+                const txDate = new Date(t.date);
+                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
+                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                    const staffIdNum = parseInt(staffId);
+                    if (weekStaffMap[staffIdNum]) {
+                        const comm = data.commission || 0;
+                        weekStaffMap[staffIdNum].jobs += (data.jobs || 1);
+                        weekStaffMap[staffIdNum].sales += (t.total || 0);
+                        weekStaffMap[staffIdNum].total += comm;
+                        weekStaffMap[staffIdNum][dayName.toLowerCase()] = (weekStaffMap[staffIdNum][dayName.toLowerCase()] || 0) + comm;
+                    }
+                });
+            }
+        });
+
+        Object.values(weekStaffMap).forEach(s => {
+            s.part1 = (s.sunday || 0) + (s.monday || 0) + (s.tuesday || 0);
+            s.part2 = (s.wednesday || 0) + (s.thursday || 0) + (s.friday || 0) + (s.saturday || 0);
+        });
+
+        let tableRows = '';
+        let grandTotal = 0;
+        let grandJobs = 0;
+        let grandSales = 0;
+        let grandSunday = 0, grandMonday = 0, grandTuesday = 0, grandWednesday = 0, grandThursday = 0, grandFriday = 0, grandSaturday = 0;
+        let grandPart1 = 0, grandPart2 = 0;
+        
+        Object.values(weekStaffMap).forEach(s => {
+            grandTotal += s.total;
+            grandJobs += s.jobs;
+            grandSales += s.sales;
+            grandSunday += (s.sunday || 0);
+            grandMonday += (s.monday || 0);
+            grandTuesday += (s.tuesday || 0);
+            grandWednesday += (s.wednesday || 0);
+            grandThursday += (s.thursday || 0);
+            grandFriday += (s.friday || 0);
+            grandSaturday += (s.saturday || 0);
+            grandPart1 += s.part1;
+            grandPart2 += s.part2;
+            
+            tableRows += `<tr class="border-b border-gray-700 hover:bg-gray-800 transition">
+                <td class="py-2 font-semibold text-left">${s.name}</td>
+                <td class="text-center">${s.position}</td>
+                <td class="text-center"><span class="commission-badge">${s.tier}%</span></td>
+                <td class="text-center">${s.jobs}</td>
+                <td class="text-center text-cyan-300">₱${(s.sunday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.monday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.tuesday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.wednesday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.thursday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.friday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${(s.saturday||0).toFixed(2)}</td>
+                <td class="text-center text-yellow-400 font-bold">₱${s.part1.toFixed(2)}</td>
+                <td class="text-center text-yellow-400 font-bold">₱${s.part2.toFixed(2)}</td>
+                <td class="text-center text-green-400 font-bold">₱${s.total.toFixed(2)}</td>
+            </tr>`;
+        });
+
+        return `<div class="card-premium p-6">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-2xl font-bold"><i class="fas fa-calendar-week"></i> Weekly Commission Report</h3>
+                    <p class="text-sm text-gray-400">${weekStartStr} to ${weekEndStr}</p>
+                    <p class="text-xs text-green-400"><i class="fas fa-sync"></i> Auto-calculated from all daily transactions</p>
+                    ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Online Mode</p>` : ''}
+                </div>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="exportWeeklyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
+                    <button onclick="exportWeeklyCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
+                    <button onclick="exportWeeklyCommissionCSV()" class="csv-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
+                    <button onclick="printWeeklyCommission()" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                <table class="w-full text-sm commission-report-grid">
+                    <thead>
+                        <tr>
+                            <th class="text-left">Staff</th>
+                            <th>Position</th>
+                            <th>Tier</th>
+                            <th>Jobs Count</th>
+                            <th>Sunday</th>
+                            <th>Monday</th>
+                            <th>Tuesday</th>
+                            <th>Wednesday</th>
+                            <th>Thursday</th>
+                            <th>Friday</th>
+                            <th>Saturday</th>
+                            <th class="text-yellow-400">Sun-Tue</th>
+                            <th class="text-yellow-400">Wed-Sat</th>
+                            <th class="text-green-400">Grand Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows || '<tr><td colspan="14" class="text-center py-4 text-gray-400">No data for this week</td></tr>'}
+                        ${Object.values(weekStaffMap).length > 0 ? `
+                        <tr class="grand-total-row">
+                            <td colspan="3" class="text-right font-bold text-cyan-400">GRAND TOTALS:</td>
+                            <td class="font-bold">${grandJobs}</td>
+                            <td class="font-bold text-cyan-300">₱${grandSunday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandMonday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandTuesday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandWednesday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandThursday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandFriday.toFixed(2)}</td>
+                            <td class="font-bold text-cyan-300">₱${grandSaturday.toFixed(2)}</td>
+                            <td class="font-bold text-yellow-400">₱${grandPart1.toFixed(2)}</td>
+                            <td class="font-bold text-yellow-400">₱${grandPart2.toFixed(2)}</td>
+                            <td class="font-bold text-green-400">₱${grandTotal.toFixed(2)}</td>
+                        </tr>
+                        ` : ''}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    // ======================== TRANSACTION TRACKING ========================
     function renderTransactionTracking() {
         if(showLogin) return renderLogin();
         recalculateStaffCommissions();
@@ -4955,155 +5122,6 @@
                     <button onclick="exportCommissionReport()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
                     <button onclick="exportCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
                 </div>
-            </div>
-        </div>`;
-    }
-
-    // ======================== WEEKLY COMMISSION REPORT ========================
-    function renderWeeklyCommissionReport() {
-        if(showLogin) return renderLogin();
-        recalculateStaffCommissions();
-
-        const now = new Date();
-        const currentWeekStart = new Date(now);
-        currentWeekStart.setDate(now.getDate() - now.getDay());
-        const weekStartStr = currentWeekStart.toISOString().slice(0,10);
-        const weekEnd = new Date(currentWeekStart);
-        weekEnd.setDate(currentWeekStart.getDate() + 6);
-        const weekEndStr = weekEnd.toISOString().slice(0,10);
-
-        const weekTx = appData.transactions.filter(t => t.date >= weekStartStr && t.date <= weekEndStr);
-        
-        const weekStaffMap = {};
-        appData.staff.forEach(s => {
-            weekStaffMap[s.id] = {
-                name: s.name,
-                position: s.position,
-                tier: s.commissionTier,
-                jobs: 0,
-                sales: 0,
-                sunday: 0, monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0, saturday: 0,
-                total: 0,
-                part1: 0,
-                part2: 0
-            };
-        });
-
-        weekTx.forEach(t => {
-            if (t.staffCommissions) {
-                const txDate = new Date(t.date);
-                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
-                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
-                    const staffIdNum = parseInt(staffId);
-                    if (weekStaffMap[staffIdNum]) {
-                        const comm = data.commission || 0;
-                        weekStaffMap[staffIdNum].jobs += (data.jobs || 1);
-                        weekStaffMap[staffIdNum].sales += (t.total || 0);
-                        weekStaffMap[staffIdNum].total += comm;
-                        weekStaffMap[staffIdNum][dayName.toLowerCase()] = (weekStaffMap[staffIdNum][dayName.toLowerCase()] || 0) + comm;
-                    }
-                });
-            }
-        });
-
-        Object.values(weekStaffMap).forEach(s => {
-            s.part1 = (s.sunday || 0) + (s.monday || 0) + (s.tuesday || 0);
-            s.part2 = (s.wednesday || 0) + (s.thursday || 0) + (s.friday || 0) + (s.saturday || 0);
-        });
-
-        let tableRows = '';
-        let grandTotal = 0;
-        let grandJobs = 0;
-        let grandSales = 0;
-        let grandSunday = 0, grandMonday = 0, grandTuesday = 0, grandWednesday = 0, grandThursday = 0, grandFriday = 0, grandSaturday = 0;
-        let grandPart1 = 0, grandPart2 = 0;
-        
-        Object.values(weekStaffMap).forEach(s => {
-            grandTotal += s.total;
-            grandJobs += s.jobs;
-            grandSales += s.sales;
-            grandSunday += (s.sunday || 0);
-            grandMonday += (s.monday || 0);
-            grandTuesday += (s.tuesday || 0);
-            grandWednesday += (s.wednesday || 0);
-            grandThursday += (s.thursday || 0);
-            grandFriday += (s.friday || 0);
-            grandSaturday += (s.saturday || 0);
-            grandPart1 += s.part1;
-            grandPart2 += s.part2;
-            
-            tableRows += `<tr class="border-b border-gray-700 hover:bg-gray-800 transition">
-                <td class="py-2 font-semibold text-left">${s.name}</td>
-                <td class="text-center">${s.position}</td>
-                <td class="text-center"><span class="commission-badge">${s.tier}%</span></td>
-                <td class="text-center">${s.jobs}</td>
-                <td class="text-center text-cyan-300">₱${(s.sunday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.monday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.tuesday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.wednesday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.thursday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.friday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.saturday||0).toFixed(2)}</td>
-                <td class="text-center text-yellow-400 font-bold">₱${s.part1.toFixed(2)}</td>
-                <td class="text-center text-yellow-400 font-bold">₱${s.part2.toFixed(2)}</td>
-                <td class="text-center text-green-400 font-bold">₱${s.total.toFixed(2)}</td>
-            </tr>`;
-        });
-
-        return `<div class="card-premium p-6">
-            <div class="flex justify-between items-center mb-4">
-                <div>
-                    <h3 class="text-2xl font-bold"><i class="fas fa-calendar-week"></i> Weekly Commission Report</h3>
-                    <p class="text-sm text-gray-400">${weekStartStr} to ${weekEndStr}</p>
-                    <p class="text-xs text-green-400"><i class="fas fa-sync"></i> Auto-calculated from all transactions</p>
-                </div>
-                <div class="flex gap-2 flex-wrap">
-                    <button onclick="exportWeeklyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
-                    <button onclick="exportWeeklyCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
-                    <button onclick="exportWeeklyCommissionCSV()" class="csv-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
-                    <button onclick="printWeeklyCommission()" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-print"></i> Print</button>
-                </div>
-            </div>
-            <div class="overflow-x-auto max-h-96 overflow-y-auto">
-                <table class="w-full text-sm commission-report-grid">
-                    <thead>
-                        <tr>
-                            <th class="text-left">Staff</th>
-                            <th>Position</th>
-                            <th>Tier</th>
-                            <th>Jobs Count</th>
-                            <th>Sunday</th>
-                            <th>Monday</th>
-                            <th>Tuesday</th>
-                            <th>Wednesday</th>
-                            <th>Thursday</th>
-                            <th>Friday</th>
-                            <th>Saturday</th>
-                            <th class="text-yellow-400">Sun-Tue</th>
-                            <th class="text-yellow-400">Wed-Sat</th>
-                            <th class="text-green-400">Grand Total</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tableRows || '<tr><td colspan="14" class="text-center py-4 text-gray-400">No data for this week</td></tr>'}
-                        ${Object.values(weekStaffMap).length > 0 ? `
-                        <tr class="grand-total-row">
-                            <td colspan="3" class="text-right font-bold text-cyan-400">GRAND TOTALS:</td>
-                            <td class="font-bold">${grandJobs}</td>
-                            <td class="font-bold text-cyan-300">₱${grandSunday.toFixed(2)}</td>
-                            <td class="font-bold text-cyan-300">₱${grandMonday.toFixed(2)}</td>
-                            <td class="font-bold text-cyan-300">₱${grandTuesday.toFixed(2)}</td>
-                            <td class="font-bold text-cyan-300">₱${grandWednesday.toFixed(2)}</td>
-                            <td class="font-bold text-cyan-300">₱${grandThursday.toFixed(2)}</td>
-                            <td class="font-bold text-cyan-300">₱${grandFriday.toFixed(2)}</td>
-                            <td class="font-bold text-cyan-300">₱${grandSaturday.toFixed(2)}</td>
-                            <td class="font-bold text-yellow-400">₱${grandPart1.toFixed(2)}</td>
-                            <td class="font-bold text-yellow-400">₱${grandPart2.toFixed(2)}</td>
-                            <td class="font-bold text-green-400">₱${grandTotal.toFixed(2)}</td>
-                        </tr>
-                        ` : ''}
-                    </tbody>
-                </table>
             </div>
         </div>`;
     }
@@ -6206,7 +6224,7 @@
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.4</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.5</span></span>
                     </div>
                 </div>
 
@@ -6246,30 +6264,26 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.4 Enhanced | Interactive Chart | All Export & Print Functions Working | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.5 Enhanced | Weekly Commission Auto-Calculated | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.4 (Enhanced)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.5 (Enhanced)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
     console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
     console.log(`%c🌐 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Online)' : 'Disconnected (Offline)'}`, 'color: #ffaa00;');
     console.log('%c📈 Interactive Sales Chart with Daily/Weekly/Monthly toggle views', 'color: #00d4ff;');
     console.log('%c📊 Today\'s Commission = Commission from Today\'s Transactions only', 'color: #00ff88;');
-    console.log('%c⚡ Enhanced Dashboard with Quick Stats, Activity Feed & Quick Actions', 'color: #00d4ff;');
+    console.log('%c📋 Weekly Commission Report auto-calculated from daily transactions', 'color: #00d4ff;');
+    console.log('%c⚡ Reorganized Admin Panel: Daily Transactions & Weekly Commission now in sidebar', 'color: #00d4ff;');
     console.log('%c📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase', 'color: #00d4ff;');
-    console.log('%c🔄 v8.7.4: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
+    console.log('%c🔄 v8.7.5: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
     console.log('%c👥 Customer Database with full transaction history and credit tracking', 'color: #00d4ff;');
     console.log('%c🛒 POS Panel fully functional with staff assignment, size selection, and open services', 'color: #00d4ff;');
-    console.log('%c🎨 Customizable UI Labels for panels and modals', 'color: #00d4ff;');
-    console.log('%c🖼️ App Icon upload - replaces the black "8" on login screen', 'color: #00d4ff;');
-    console.log('%c📐 Logo size adjustment for receipts and PDF reports', 'color: #00d4ff;');
-    console.log('%c⏰ Inactivity auto-logout for security', 'color: #00d4ff;');
-    console.log('%c📋 Activity Log for tracking user actions', 'color: #00d4ff;');
     if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect online', 'color: #ff6b6b;');
     } else {
