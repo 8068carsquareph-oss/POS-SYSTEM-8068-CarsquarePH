@@ -1,9 +1,10 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.7.6</title>
+    <title>8068 CAR SQUARE | POS System v8.7.7</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -463,6 +464,20 @@
         @media (max-width: 768px) { .panel-grid { grid-template-columns: 1fr; } }
         .commission-live-badge { animation: pulse-commission 2s ease-in-out infinite; }
         @keyframes pulse-commission { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .week-card { background: rgba(10,10,10,0.4); border: 1px solid rgba(0,212,255,0.1); border-radius: 10px; padding: 12px; transition: all 0.3s; }
+        .week-card:hover { border-color: rgba(0,212,255,0.3); transform: translateY(-2px); }
+        .week-card .week-label { font-size: 13px; font-weight: 600; color: #00d4ff; }
+        .week-card .week-dates { font-size: 11px; color: #888; }
+        .week-card .week-total { font-size: 18px; font-weight: 700; color: #00ff88; }
+        .week-card .week-staff { font-size: 11px; color: #aaa; }
+        .week-card .week-staff span { color: #a78bfa; }
+        .archive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+        .report-archive-card { background: rgba(10,10,10,0.5); border: 1px solid rgba(0,212,255,0.08); border-radius: 10px; padding: 14px; transition: all 0.3s; cursor: pointer; }
+        .report-archive-card:hover { border-color: rgba(0,212,255,0.3); transform: translateY(-3px); box-shadow: 0 8px 25px rgba(0,212,255,0.05); }
+        .report-archive-card .archive-title { font-weight: 600; color: #00d4ff; }
+        .report-archive-card .archive-date { font-size: 11px; color: #888; }
+        .report-archive-card .archive-total { font-size: 16px; font-weight: 700; color: #00ff88; }
+        .report-archive-card .archive-stats { font-size: 11px; color: #aaa; }
     </style>
 </head>
 <body class="text-white">
@@ -740,8 +755,11 @@
                 if (!appData.systemSettings.enableNotifications) appData.systemSettings.enableNotifications = true;
                 if (!appData.systemSettings.inactivityTimeout) appData.systemSettings.inactivityTimeout = 30;
                 if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
-                // Ensure weekly commission data is initialized
-                if (!appData.commissionWeekly) appData.commissionWeekly = { staff: {}, totals: {}, weekStart: '' };
+                // Initialize weekly commission archives
+                if (!appData.commissionWeekly) appData.commissionWeekly = { current: null, archives: [] };
+                if (!appData.commissionWeekly.current) {
+                    appData.commissionWeekly.current = { weekStart: '', staff: {}, totals: {} };
+                }
                 dataLoaded = true;
                 addFirebaseLog('📂 Loaded from localStorage (cache)', 'info');
                 renderApp();
@@ -820,7 +838,10 @@
                     }
                     if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
                     if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
-                    if (!appData.commissionWeekly) appData.commissionWeekly = { staff: {}, totals: {}, weekStart: '' };
+                    if (!appData.commissionWeekly) appData.commissionWeekly = { current: null, archives: [] };
+                    if (!appData.commissionWeekly.current) {
+                        appData.commissionWeekly.current = { weekStart: '', staff: {}, totals: {} };
+                    }
                     dataLoaded = true;
                     if (hasChanges) {
                         saveToLocal();
@@ -880,9 +901,9 @@
             nextIds: appData.nextIds || {},
             commissionMatrix: appData.commissionMatrix || {},
             reports: appData.reports || { weekly: [], monthly: [], yearly: [] },
-            commissionWeekly: appData.commissionWeekly || { staff: {}, totals: {}, weekStart: '' },
+            commissionWeekly: appData.commissionWeekly || { current: null, archives: [] },
             lastUpdated: new Date().toISOString(),
-            version: '8.7.6'
+            version: '8.7.7'
         };
 
         const dataToSync = sanitizeDataForFirebase(rawData);
@@ -1097,7 +1118,7 @@
         nextIds: { transaction: 100, customer: 50, expense: 20, service: 50, openService: 1, credit: 1 },
         commissionMatrix: initializeCommissionMatrix(),
         reports: { weekly: [], monthly: [], yearly: [] },
-        commissionWeekly: { staff: {}, totals: {}, weekStart: '' }
+        commissionWeekly: { current: null, archives: [] }
     };
 
     function getDescription(name) {
@@ -1165,7 +1186,10 @@
             }
             if (!appData.systemSettings.activityLog) appData.systemSettings.activityLog = [];
             if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
-            if (!appData.commissionWeekly) appData.commissionWeekly = { staff: {}, totals: {}, weekStart: '' };
+            if (!appData.commissionWeekly) appData.commissionWeekly = { current: null, archives: [] };
+            if (!appData.commissionWeekly.current) {
+                appData.commissionWeekly.current = { weekStart: '', staff: {}, totals: {} };
+            }
             dataLoaded = true;
         } catch(e) {}
     }
@@ -1279,16 +1303,46 @@
         saveToLocal();
     }
 
-    // ======================== REAL-TIME WEEKLY COMMISSION CALCULATOR ========================
+    // ======================== ENHANCED WEEKLY COMMISSION WITH ARCHIVE ========================
+    function getWeekDates(weekStart) {
+        const start = new Date(weekStart);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        return {
+            start: start,
+            end: end,
+            startStr: start.toISOString().slice(0,10),
+            endStr: end.toISOString().slice(0,10),
+            label: `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+        };
+    }
+
+    function getWeekStartForDate(date) {
+        const d = new Date(date);
+        d.setDate(d.getDate() - d.getDay());
+        d.setHours(0, 0, 0, 0);
+        return d.toISOString().slice(0,10);
+    }
+
     function calculateWeeklyCommission() {
         const now = new Date();
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - now.getDay());
-        weekStart.setHours(0, 0, 0, 0);
-        const weekStartStr = weekStart.toISOString().slice(0,10);
+        const currentWeekStart = getWeekStartForDate(now);
+        const weekInfo = getWeekDates(currentWeekStart);
         
-        // Initialize weekly data
-        const weeklyData = { staff: {}, totals: { commission: 0, sales: 0, jobs: 0 }, weekStart: weekStartStr };
+        // Initialize current week data
+        const weeklyData = { 
+            weekStart: currentWeekStart,
+            weekLabel: weekInfo.label,
+            staff: {}, 
+            totals: { commission: 0, sales: 0, jobs: 0 },
+            dailyBreakdown: {}
+        };
+        
+        // Get all days of the week
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        days.forEach(day => {
+            weeklyData.dailyBreakdown[day] = { commission: 0, sales: 0, jobs: 0 };
+        });
         
         // Initialize staff entries
         appData.staff.forEach(s => {
@@ -1299,15 +1353,18 @@
                 commission: 0,
                 jobs: 0,
                 sales: 0,
-                sunday: 0, monday: 0, tuesday: 0, wednesday: 0, thursday: 0, friday: 0, saturday: 0
+                daily: {}
             };
+            days.forEach(day => {
+                weeklyData.staff[s.id].daily[day] = 0;
+            });
         });
         
         // Process all transactions for the current week
         appData.transactions.forEach(t => {
-            if (t.date >= weekStartStr && t.staffCommissions) {
+            if (t.date >= currentWeekStart && t.staffCommissions) {
                 const txDate = new Date(t.date);
-                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()].toLowerCase();
+                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
                 Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
                     const sid = parseInt(staffId);
                     if (weeklyData.staff[sid]) {
@@ -1315,66 +1372,80 @@
                         weeklyData.staff[sid].commission += comm;
                         weeklyData.staff[sid].jobs += (data.jobs || 1);
                         weeklyData.staff[sid].sales += (t.total || 0);
-                        weeklyData.staff[sid][dayName] = (weeklyData.staff[sid][dayName] || 0) + comm;
+                        weeklyData.staff[sid].daily[dayName] = (weeklyData.staff[sid].daily[dayName] || 0) + comm;
                         weeklyData.totals.commission += comm;
                         weeklyData.totals.sales += (t.total || 0);
                         weeklyData.totals.jobs += (data.jobs || 1);
+                        weeklyData.dailyBreakdown[dayName].commission += comm;
+                        weeklyData.dailyBreakdown[dayName].sales += (t.total || 0);
+                        weeklyData.dailyBreakdown[dayName].jobs += (data.jobs || 1);
                     }
                 });
             }
         });
         
-        // Process open services that were completed this week
+        // Process open services completed this week
         appData.openServices.forEach(s => {
-            if (s.completedAt && s.completedAt >= weekStartStr && s.commissionProcessed && s.transactionId) {
-                // Already counted via transaction, skip
+            if (s.completedAt && s.completedAt >= currentWeekStart && s.commissionProcessed && s.pendingCommission) {
+                const txDate = new Date(s.completedAt);
+                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
+                const staffMap = s.pendingCommission.staffMap || {};
+                Object.entries(staffMap).forEach(([staffId, data]) => {
+                    const sid = parseInt(staffId);
+                    if (weeklyData.staff[sid]) {
+                        const comm = data.commission || 0;
+                        weeklyData.staff[sid].commission += comm;
+                        weeklyData.staff[sid].jobs += (data.jobs || 1);
+                        weeklyData.staff[sid].sales += s.total;
+                        weeklyData.staff[sid].daily[dayName] = (weeklyData.staff[sid].daily[dayName] || 0) + comm;
+                        weeklyData.totals.commission += comm;
+                        weeklyData.totals.sales += s.total;
+                        weeklyData.totals.jobs += (data.jobs || 1);
+                        weeklyData.dailyBreakdown[dayName].commission += comm;
+                        weeklyData.dailyBreakdown[dayName].sales += s.total;
+                        weeklyData.dailyBreakdown[dayName].jobs += (data.jobs || 1);
+                    }
+                });
             }
         });
         
-        // Also check for pending commissions from open services completed this week but not yet in transactions
-        appData.openServices.forEach(s => {
-            if (s.status === 'completed' || s.status === 'paid') {
-                if (s.completedAt && s.completedAt >= weekStartStr && s.pendingCommission) {
-                    const txDate = new Date(s.completedAt);
-                    const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()].toLowerCase();
-                    const staffMap = s.pendingCommission.staffMap || {};
-                    Object.entries(staffMap).forEach(([staffId, data]) => {
-                        const sid = parseInt(staffId);
-                        if (weeklyData.staff[sid]) {
-                            const comm = data.commission || 0;
-                            weeklyData.staff[sid].commission += comm;
-                            weeklyData.staff[sid].jobs += (data.jobs || 1);
-                            weeklyData.staff[sid].sales += s.total;
-                            weeklyData.staff[sid][dayName] = (weeklyData.staff[sid][dayName] || 0) + comm;
-                            weeklyData.totals.commission += comm;
-                            weeklyData.totals.sales += s.total;
-                            weeklyData.totals.jobs += (data.jobs || 1);
-                        }
-                    });
+        // Check if we need to archive the previous week (if week has changed)
+        if (appData.commissionWeekly.current && appData.commissionWeekly.current.weekStart !== currentWeekStart) {
+            // Archive the previous week
+            const prevWeek = appData.commissionWeekly.current;
+            if (prevWeek.weekStart && Object.keys(prevWeek.staff).length > 0) {
+                if (!appData.commissionWeekly.archives) appData.commissionWeekly.archives = [];
+                appData.commissionWeekly.archives.push({
+                    weekStart: prevWeek.weekStart,
+                    weekLabel: prevWeek.weekLabel,
+                    staff: prevWeek.staff,
+                    totals: prevWeek.totals,
+                    dailyBreakdown: prevWeek.dailyBreakdown,
+                    archivedAt: new Date().toISOString()
+                });
+                // Keep only last 52 weeks
+                if (appData.commissionWeekly.archives.length > 52) {
+                    appData.commissionWeekly.archives = appData.commissionWeekly.archives.slice(-52);
                 }
             }
-        });
+        }
         
-        // Store the calculated weekly data
-        appData.commissionWeekly = weeklyData;
+        // Store the current week data
+        appData.commissionWeekly.current = weeklyData;
         saveToLocal();
         return weeklyData;
     }
 
     function getWeeklyCommission() {
         const now = new Date();
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - now.getDay());
-        weekStart.setHours(0, 0, 0, 0);
-        const weekStartStr = weekStart.toISOString().slice(0,10);
+        const currentWeekStart = getWeekStartForDate(now);
         
         // Check if we need to recalculate (new week or no data)
-        if (!appData.commissionWeekly || appData.commissionWeekly.weekStart !== weekStartStr) {
+        if (!appData.commissionWeekly.current || appData.commissionWeekly.current.weekStart !== currentWeekStart) {
             return calculateWeeklyCommission();
         }
         
-        // Check if there are new transactions or open services that affect the weekly data
-        // Simple check: if any transaction date is after the last calculation
+        // Check for new transactions since last calc
         let needsRecalc = false;
         const lastCalcTime = localStorage.getItem('8068_weekly_calc_time');
         if (lastCalcTime) {
@@ -1393,18 +1464,15 @@
             return calculateWeeklyCommission();
         }
         
-        return appData.commissionWeekly;
+        return appData.commissionWeekly.current;
     }
 
-    // Trigger weekly commission calculation on any transaction or open service change
     function triggerWeeklyCommissionUpdate() {
         localStorage.setItem('8068_weekly_calc_time', new Date().toISOString());
         calculateWeeklyCommission();
-        // Update the weekly commission report if it's currently being viewed
         if (currentAdminPanel === 'weeklycommission' || currentView === 'commission') {
             renderApp();
         }
-        // Also update dashboard if it's visible
         if (currentView === 'dashboard') {
             renderApp();
         }
@@ -1745,7 +1813,7 @@
                     ${appData.systemSettings.appIcon ? `<img src="${appData.systemSettings.appIcon}" class="mx-auto max-h-20 mb-4 rounded-lg">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.6</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.7</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online Mode' : 'Offline Mode'}</p>
                 </div>
@@ -2072,7 +2140,7 @@
         generatePeriodicReport('weekly');
         generatePeriodicReport('monthly');
         generatePeriodicReport('yearly');
-        triggerWeeklyCommissionUpdate(); // Auto-sync weekly commission
+        triggerWeeklyCommissionUpdate();
         addActivityLog('Sale Completed', `Transaction ${transaction.id} - ₱${total.toFixed(2)} - ${selectedPayment}`);
         alert(`✅ SALE COMPLETED!\nTotal: ₱${total.toFixed(2)}${isCredit ? '\n⚠️ CREDIT (UTANG) - PENDING PAYMENT' : ''}`);
         printReceipt(transaction);
@@ -3167,6 +3235,7 @@
                     <span class="text-sm text-gray-400">Weekly Commission Auto-Sync:</span>
                     <span class="text-sm font-bold text-purple-400">₱${weeklyCommission.toFixed(2)}</span>
                     <span class="text-xs text-gray-500">(${Object.keys(weeklyStaffData).length} staff active)</span>
+                    <span class="text-xs text-gray-500">${weeklyData.weekLabel || ''}</span>
                 </div>
                 <div class="flex gap-2">
                     <button onclick="navigateAdmin('weeklycommission')" class="bg-purple-600 px-3 py-1 rounded text-xs hover:bg-purple-700 transition">View Full Report</button>
@@ -3470,12 +3539,13 @@
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.7.6</div>
+                        <div>v8.7.7</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
                     ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400 text-[10px]">🌐 Online Mode | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Offline Mode | Using local cache</div>`}
-                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Weekly Commission auto-sync from POS & Open Services</div>
+                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Weekly Commission auto-sync with archive (resets every Saturday)</div>
+                    <div class="mt-1 text-cyan-400 text-[10px]">📋 Weekly reports archived for monthly/yearly tracking</div>
                     ${isUsingDemoConfig ? `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Using demo Firebase config - Configure your own in System Settings</div>` : ''}
                 </div>
             </div>
@@ -3914,7 +3984,7 @@
         const appIconHtml = s.appIcon ? `<img src="${s.appIcon}" class="app-icon-preview">` : 'No app icon uploaded';
         const timeout = s.inactivityTimeout || 30;
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.6</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.7</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -3997,6 +4067,10 @@
                                 <label class="text-gray-400 text-xs">Auto-Sync Weekly Commission</label>
                                 <span class="text-green-400 text-xs"><i class="fas fa-check-circle"></i> Always ON</span>
                             </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-gray-400 text-xs">Weekly Report Archive</label>
+                                <span class="text-cyan-400 text-xs"><i class="fas fa-archive"></i> ${(appData.commissionWeekly.archives || []).length} archived weeks</span>
+                            </div>
                         </div>
                     </div>
                     
@@ -4031,17 +4105,18 @@
                 ${firebaseInitialized ? `<button onclick="pullFromFirebase()" class="bg-purple-600 p-2 rounded"><i class="fas fa-cloud-download-alt"></i> Pull from Cloud</button>` : ''}
                 <button onclick="clearActivityLog()" class="bg-yellow-600 p-2 rounded"><i class="fas fa-eraser"></i> Clear Activity Log</button>
                 <button onclick="forceWeeklyCommissionRecalc()" class="bg-purple-600 p-2 rounded"><i class="fas fa-sync"></i> Recalc Weekly Commission</button>
+                <button onclick="archiveCurrentWeek()" class="bg-indigo-600 p-2 rounded"><i class="fas fa-archive"></i> Archive Current Week</button>
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.7.6 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.7.7 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
-                <div class="mt-1 text-cyan-400">📊 Weekly Commission auto-sync from POS & Open Services</div>
-                <div class="mt-1 text-green-400">⚡ Daily Transactions and Weekly Commission in Admin Panel</div>
+                <div class="mt-1 text-cyan-400">📊 Weekly Commission auto-sync with archive (resets every Saturday)</div>
+                <div class="mt-1 text-green-400">📋 Weekly reports archived for monthly/yearly tracking</div>
                 <div class="mt-1 text-cyan-400">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</div>
                 <div class="mt-1 text-green-400">📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🌐 Firebase: Connected (Online) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🌐 Firebase: Disconnected - Using local cache</div>`}
@@ -4051,6 +4126,33 @@
             </div>
         </div>`;
     }
+
+    // Archive current week
+    window.archiveCurrentWeek = function() {
+        const current = appData.commissionWeekly.current;
+        if (current && current.weekStart && Object.keys(current.staff).length > 0) {
+            if (!appData.commissionWeekly.archives) appData.commissionWeekly.archives = [];
+            // Check if already archived
+            const exists = appData.commissionWeekly.archives.some(a => a.weekStart === current.weekStart);
+            if (!exists) {
+                appData.commissionWeekly.archives.push({
+                    weekStart: current.weekStart,
+                    weekLabel: current.weekLabel,
+                    staff: JSON.parse(JSON.stringify(current.staff)),
+                    totals: JSON.parse(JSON.stringify(current.totals)),
+                    dailyBreakdown: JSON.parse(JSON.stringify(current.dailyBreakdown)),
+                    archivedAt: new Date().toISOString()
+                });
+                saveToLocal();
+                alert('✅ Current week archived successfully!');
+                renderApp();
+            } else {
+                alert('⚠️ This week is already archived.');
+            }
+        } else {
+            alert('⚠️ No data to archive for the current week.');
+        }
+    };
 
     // Force weekly commission recalculation
     window.forceWeeklyCommissionRecalc = function() {
@@ -4165,7 +4267,7 @@
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.6</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.7</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -4183,8 +4285,8 @@
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
-                    <p class="text-green-400 mt-1">✅ v8.7.6: Weekly Commission auto-sync from POS & Open Services</p>
-                    <p class="text-green-400 mt-1">📊 Real-time commission calculation from all transactions</p>
+                    <p class="text-green-400 mt-1">✅ v8.7.7: Weekly Commission auto-sync with archive</p>
+                    <p class="text-green-400 mt-1">📊 Weekly reports reset every Saturday and auto-archived</p>
                     <p class="text-green-400 mt-1">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
                     <p class="text-green-400 mt-1">⚡ Offline support - data syncs when connection is restored</p>
@@ -4433,7 +4535,7 @@
         </div>`;
     }
 
-    // ======================== WEEKLY COMMISSION REPORT - AUTO-SYNC FROM TRANSACTIONS ========================
+    // ======================== ENHANCED WEEKLY COMMISSION REPORT WITH ARCHIVE ========================
     function renderWeeklyCommissionReport() {
         if(showLogin) return renderLogin();
         
@@ -4442,12 +4544,27 @@
         const staffData = weeklyData.staff || {};
         const totals = weeklyData.totals || { commission: 0, sales: 0, jobs: 0 };
         const weekStartStr = weeklyData.weekStart || new Date().toISOString().slice(0,10);
+        const weekLabel = weeklyData.weekLabel || '';
+        const dailyBreakdown = weeklyData.dailyBreakdown || {};
         
         const now = new Date();
         const weekEnd = new Date(now);
         weekEnd.setDate(now.getDate() + (6 - now.getDay()));
         const weekEndStr = weekEnd.toISOString().slice(0,10);
 
+        // Daily breakdown rows
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        let dailyRows = days.map(day => {
+            const data = dailyBreakdown[day] || { commission: 0, sales: 0, jobs: 0 };
+            return `<div class="flex justify-between items-center border-b border-gray-700/30 py-1 text-xs">
+                <span class="text-gray-400">${day}</span>
+                <span class="text-cyan-300">₱${data.sales.toFixed(2)}</span>
+                <span class="text-purple-400">₱${data.commission.toFixed(2)}</span>
+                <span class="text-yellow-400">${data.jobs}</span>
+            </div>`;
+        }).join('');
+
+        // Staff table rows
         let tableRows = '';
         let grandTotal = 0;
         let grandJobs = 0;
@@ -4462,15 +4579,22 @@
             grandTotal += total;
             grandJobs += jobs;
             grandSales += sales;
-            grandSunday += (s.sunday || 0);
-            grandMonday += (s.monday || 0);
-            grandTuesday += (s.tuesday || 0);
-            grandWednesday += (s.wednesday || 0);
-            grandThursday += (s.thursday || 0);
-            grandFriday += (s.friday || 0);
-            grandSaturday += (s.saturday || 0);
-            const part1 = (s.sunday || 0) + (s.monday || 0) + (s.tuesday || 0);
-            const part2 = (s.wednesday || 0) + (s.thursday || 0) + (s.friday || 0) + (s.saturday || 0);
+            const sunday = s.daily?.Sunday || 0;
+            const monday = s.daily?.Monday || 0;
+            const tuesday = s.daily?.Tuesday || 0;
+            const wednesday = s.daily?.Wednesday || 0;
+            const thursday = s.daily?.Thursday || 0;
+            const friday = s.daily?.Friday || 0;
+            const saturday = s.daily?.Saturday || 0;
+            grandSunday += sunday;
+            grandMonday += monday;
+            grandTuesday += tuesday;
+            grandWednesday += wednesday;
+            grandThursday += thursday;
+            grandFriday += friday;
+            grandSaturday += saturday;
+            const part1 = sunday + monday + tuesday;
+            const part2 = wednesday + thursday + friday + saturday;
             grandPart1 += part1;
             grandPart2 += part2;
             
@@ -4479,13 +4603,13 @@
                 <td class="text-center">${s.position}</td>
                 <td class="text-center"><span class="commission-badge">${s.tier}%</span></td>
                 <td class="text-center">${jobs}</td>
-                <td class="text-center text-cyan-300">₱${(s.sunday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.monday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.tuesday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.wednesday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.thursday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.friday||0).toFixed(2)}</td>
-                <td class="text-center text-cyan-300">₱${(s.saturday||0).toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${sunday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${monday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${tuesday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${wednesday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${thursday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${friday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${saturday.toFixed(2)}</td>
                 <td class="text-center text-yellow-400 font-bold">₱${part1.toFixed(2)}</td>
                 <td class="text-center text-yellow-400 font-bold">₱${part2.toFixed(2)}</td>
                 <td class="text-center text-green-400 font-bold">₱${total.toFixed(2)}</td>
@@ -4512,26 +4636,185 @@
             `;
         }
 
+        // Archive display
+        const archives = appData.commissionWeekly.archives || [];
+        let archiveHtml = '';
+        if (archives.length > 0) {
+            const sortedArchives = [...archives].reverse().slice(0, 12);
+            archiveHtml = `<div class="mt-4">
+                <h4 class="text-sm font-bold text-cyan-400 mb-2"><i class="fas fa-archive"></i> Archived Weekly Reports (${archives.length})</h4>
+                <div class="archive-grid">
+                    ${sortedArchives.map(a => {
+                        const total = a.totals?.commission || 0;
+                        const staffCount = Object.keys(a.staff || {}).length;
+                        return `<div class="report-archive-card" onclick="viewArchivedWeek('${a.weekStart}')">
+                            <div class="archive-title">Week of ${a.weekLabel || a.weekStart}</div>
+                            <div class="archive-date">${new Date(a.archivedAt).toLocaleDateString()}</div>
+                            <div class="archive-total">₱${total.toFixed(2)}</div>
+                            <div class="archive-stats">${staffCount} staff | ${a.totals?.jobs || 0} jobs</div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
         // Live update badge
         const lastUpdated = localStorage.getItem('8068_weekly_calc_time') ? 
-            new Date(localStorage.getItem('8068_weekly_calc_time')).toLocaleTimeString() : 
+            new Date(localStorage.getItem('8068_weekly_calc_time')).toLocaleString() : 
             'Just now';
 
         return `<div class="card-premium p-6">
             <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <div>
                     <h3 class="text-2xl font-bold"><i class="fas fa-calendar-week"></i> Weekly Commission Report</h3>
-                    <p class="text-sm text-gray-400">${weekStartStr} to ${weekEndStr}</p>
+                    <p class="text-sm text-gray-400">${weekLabel || `${weekStartStr} to ${weekEndStr}`}</p>
                     <p class="text-xs text-green-400"><i class="fas fa-sync"></i> Auto-synced from all transactions & open services</p>
+                    <p class="text-xs text-cyan-400"><i class="fas fa-info-circle"></i> Resets every Saturday | ${Object.keys(staffData).length} staff active</p>
                     ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Online Mode</p>` : ''}
                 </div>
                 <div class="flex gap-2 flex-wrap">
                     <span class="text-xs text-purple-400 bg-purple-900/30 px-3 py-1 rounded-full"><i class="fas fa-circle text-green-400 text-[8px] mr-1"></i> Live: ${lastUpdated}</span>
                     <button onclick="forceWeeklyCommissionRecalc()" class="bg-purple-600 px-3 py-1 rounded text-sm hover:bg-purple-700 transition"><i class="fas fa-sync"></i> Refresh</button>
+                    <button onclick="archiveCurrentWeek()" class="bg-indigo-600 px-3 py-1 rounded text-sm hover:bg-indigo-700 transition"><i class="fas fa-archive"></i> Archive</button>
                     <button onclick="exportWeeklyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
                     <button onclick="exportWeeklyCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
                     <button onclick="exportWeeklyCommissionCSV()" class="csv-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
                     <button onclick="printWeeklyCommission()" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                </div>
+            </div>
+            
+            <!-- Daily Breakdown -->
+            <div class="grid grid-cols-3 gap-4 mb-4">
+                <div class="bg-gray-800/30 p-3 rounded-lg text-center">
+                    <div class="text-xs text-gray-400">Total Commission</div>
+                    <div class="text-2xl font-bold text-green-400">₱${grandTotal.toFixed(2)}</div>
+                </div>
+                <div class="bg-gray-800/30 p-3 rounded-lg text-center">
+                    <div class="text-xs text-gray-400">Total Sales</div>
+                    <div class="text-2xl font-bold text-cyan-400">₱${grandSales.toFixed(2)}</div>
+                </div>
+                <div class="bg-gray-800/30 p-3 rounded-lg text-center">
+                    <div class="text-xs text-gray-400">Total Jobs</div>
+                    <div class="text-2xl font-bold text-yellow-400">${grandJobs}</div>
+                </div>
+            </div>
+            
+            <div class="grid md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-gray-800/20 p-3 rounded-lg">
+                    <div class="text-xs text-gray-400 mb-1">Daily Breakdown</div>
+                    ${dailyRows}
+                </div>
+                <div class="md:col-span-3 overflow-x-auto max-h-96 overflow-y-auto">
+                    <table class="w-full text-sm commission-report-grid">
+                        <thead>
+                            <tr>
+                                <th class="text-left">Staff</th>
+                                <th>Position</th>
+                                <th>Tier</th>
+                                <th>Jobs</th>
+                                <th>Sunday</th>
+                                <th>Monday</th>
+                                <th>Tuesday</th>
+                                <th>Wednesday</th>
+                                <th>Thursday</th>
+                                <th>Friday</th>
+                                <th>Saturday</th>
+                                <th class="text-yellow-400">Sun-Tue</th>
+                                <th class="text-yellow-400">Wed-Sat</th>
+                                <th class="text-green-400">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows || '<tr><td colspan="14" class="text-center py-4 text-gray-400">No data for this week</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Archive Section -->
+            ${archiveHtml}
+        </div>`;
+    }
+
+    // View archived week
+    window.viewArchivedWeek = function(weekStart) {
+        const archives = appData.commissionWeekly.archives || [];
+        const archive = archives.find(a => a.weekStart === weekStart);
+        if (!archive) {
+            alert('Archived week not found.');
+            return;
+        }
+        
+        const staffData = archive.staff || {};
+        const totals = archive.totals || { commission: 0, sales: 0, jobs: 0 };
+        const weekLabel = archive.weekLabel || weekStart;
+        
+        let tableRows = '';
+        let grandTotal = 0;
+        let grandJobs = 0;
+        let grandSales = 0;
+        
+        Object.values(staffData).forEach(s => {
+            const total = s.commission || 0;
+            const jobs = s.jobs || 0;
+            const sales = s.sales || 0;
+            grandTotal += total;
+            grandJobs += jobs;
+            grandSales += sales;
+            const sunday = s.daily?.Sunday || 0;
+            const monday = s.daily?.Monday || 0;
+            const tuesday = s.daily?.Tuesday || 0;
+            const wednesday = s.daily?.Wednesday || 0;
+            const thursday = s.daily?.Thursday || 0;
+            const friday = s.daily?.Friday || 0;
+            const saturday = s.daily?.Saturday || 0;
+            const part1 = sunday + monday + tuesday;
+            const part2 = wednesday + thursday + friday + saturday;
+            
+            tableRows += `<tr class="border-b border-gray-700 hover:bg-gray-800 transition">
+                <td class="py-2 font-semibold text-left">${s.name}</td>
+                <td class="text-center">${s.position}</td>
+                <td class="text-center"><span class="commission-badge">${s.tier}%</span></td>
+                <td class="text-center">${jobs}</td>
+                <td class="text-center text-cyan-300">₱${sunday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${monday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${tuesday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${wednesday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${thursday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${friday.toFixed(2)}</td>
+                <td class="text-center text-cyan-300">₱${saturday.toFixed(2)}</td>
+                <td class="text-center text-yellow-400 font-bold">₱${part1.toFixed(2)}</td>
+                <td class="text-center text-yellow-400 font-bold">₱${part2.toFixed(2)}</td>
+                <td class="text-center text-green-400 font-bold">₱${total.toFixed(2)}</td>
+            </tr>`;
+        });
+        
+        if (Object.keys(staffData).length > 0) {
+            tableRows += `
+                <tr class="grand-total-row">
+                    <td colspan="3" class="text-right font-bold text-cyan-400">GRAND TOTALS:</td>
+                    <td class="font-bold">${grandJobs}</td>
+                    <td colspan="10" class="text-right font-bold text-green-400">₱${grandTotal.toFixed(2)}</td>
+                </tr>
+            `;
+        }
+        
+        // Show in modal
+        let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content">
+            <h3 class="text-xl font-bold mb-2">Archived Week: ${weekLabel}</h3>
+            <p class="text-sm text-gray-400 mb-4">Archived on: ${new Date(archive.archivedAt).toLocaleString()}</p>
+            <div class="grid grid-cols-3 gap-3 mb-4">
+                <div class="bg-gray-800/30 p-2 rounded text-center">
+                    <div class="text-xs text-gray-400">Total Commission</div>
+                    <div class="text-lg font-bold text-green-400">₱${grandTotal.toFixed(2)}</div>
+                </div>
+                <div class="bg-gray-800/30 p-2 rounded text-center">
+                    <div class="text-xs text-gray-400">Total Sales</div>
+                    <div class="text-lg font-bold text-cyan-400">₱${grandSales.toFixed(2)}</div>
+                </div>
+                <div class="bg-gray-800/30 p-2 rounded text-center">
+                    <div class="text-xs text-gray-400">Total Jobs</div>
+                    <div class="text-lg font-bold text-yellow-400">${grandJobs}</div>
                 </div>
             </div>
             <div class="overflow-x-auto max-h-96 overflow-y-auto">
@@ -4541,17 +4824,12 @@
                             <th class="text-left">Staff</th>
                             <th>Position</th>
                             <th>Tier</th>
-                            <th>Jobs Count</th>
-                            <th>Sunday</th>
-                            <th>Monday</th>
-                            <th>Tuesday</th>
-                            <th>Wednesday</th>
-                            <th>Thursday</th>
-                            <th>Friday</th>
-                            <th>Saturday</th>
+                            <th>Jobs</th>
+                            <th>Sun</th><th>Mon</th><th>Tue</th>
+                            <th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
                             <th class="text-yellow-400">Sun-Tue</th>
                             <th class="text-yellow-400">Wed-Sat</th>
-                            <th class="text-green-400">Grand Total</th>
+                            <th class="text-green-400">Total</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -4559,14 +4837,12 @@
                     </tbody>
                 </table>
             </div>
-            <div class="mt-3 text-xs text-gray-500 flex justify-between">
-                <span>Total Commission: <strong class="text-green-400">₱${grandTotal.toFixed(2)}</strong></span>
-                <span>Total Sales: <strong class="text-cyan-400">₱${grandSales.toFixed(2)}</strong></span>
-                <span>Total Jobs: <strong class="text-yellow-400">${grandJobs}</strong></span>
-                <span>Staff: <strong class="text-purple-400">${Object.keys(staffData).length}</strong></span>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeAdminModal()" class="bg-gray-700 flex-1 p-2 rounded">Close</button>
             </div>
-        </div>`;
-    }
+        </div></div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    };
 
     // ======================== TRANSACTION TRACKING ========================
     function renderTransactionTracking() {
@@ -5329,12 +5605,18 @@
             </tr>`;
         }).join('');
         
+        // Weekly archive stats
+        const archives = appData.commissionWeekly.archives || [];
+        const archiveStats = archives.length > 0 ? 
+            `<div class="text-xs text-gray-400 mt-2">${archives.length} archived weeks available</div>` : '';
+
         return `<div class="space-y-6">
             <div class="card-premium p-6">
                 <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                     <div>
                         <h3 class="text-2xl font-bold"><i class="fas fa-percent"></i> Staff Commission Summary</h3>
                         <p class="text-sm text-gray-400">Total Commission: <span class="text-green-400 font-bold">₱${totalCommission.toFixed(2)}</span></p>
+                        ${archiveStats}
                     </div>
                     <div class="flex gap-2 flex-wrap">
                         <button onclick="exportCommissionReport()" class="excel-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
@@ -6084,15 +6366,15 @@
             position: s.position,
             tier: `${s.tier}%`,
             jobs: s.jobs || 0,
-            sunday: `₱${(s.sunday||0).toFixed(2)}`,
-            monday: `₱${(s.monday||0).toFixed(2)}`,
-            tuesday: `₱${(s.tuesday||0).toFixed(2)}`,
-            wednesday: `₱${(s.wednesday||0).toFixed(2)}`,
-            thursday: `₱${(s.thursday||0).toFixed(2)}`,
-            friday: `₱${(s.friday||0).toFixed(2)}`,
-            saturday: `₱${(s.saturday||0).toFixed(2)}`,
-            part1: `₱${((s.sunday||0)+(s.monday||0)+(s.tuesday||0)).toFixed(2)}`,
-            part2: `₱${((s.wednesday||0)+(s.thursday||0)+(s.friday||0)+(s.saturday||0)).toFixed(2)}`,
+            sunday: `₱${(s.daily?.Sunday || 0).toFixed(2)}`,
+            monday: `₱${(s.daily?.Monday || 0).toFixed(2)}`,
+            tuesday: `₱${(s.daily?.Tuesday || 0).toFixed(2)}`,
+            wednesday: `₱${(s.daily?.Wednesday || 0).toFixed(2)}`,
+            thursday: `₱${(s.daily?.Thursday || 0).toFixed(2)}`,
+            friday: `₱${(s.daily?.Friday || 0).toFixed(2)}`,
+            saturday: `₱${(s.daily?.Saturday || 0).toFixed(2)}`,
+            part1: `₱${((s.daily?.Sunday || 0) + (s.daily?.Monday || 0) + (s.daily?.Tuesday || 0)).toFixed(2)}`,
+            part2: `₱${((s.daily?.Wednesday || 0) + (s.daily?.Thursday || 0) + (s.daily?.Friday || 0) + (s.daily?.Saturday || 0)).toFixed(2)}`,
             total: `₱${(s.commission||0).toFixed(2)}`
         }));
         const columns = [
@@ -6121,15 +6403,15 @@
             position: s.position,
             tier: `${s.tier}%`,
             jobs: s.jobs || 0,
-            sunday: `₱${(s.sunday||0).toFixed(2)}`,
-            monday: `₱${(s.monday||0).toFixed(2)}`,
-            tuesday: `₱${(s.tuesday||0).toFixed(2)}`,
-            wednesday: `₱${(s.wednesday||0).toFixed(2)}`,
-            thursday: `₱${(s.thursday||0).toFixed(2)}`,
-            friday: `₱${(s.friday||0).toFixed(2)}`,
-            saturday: `₱${(s.saturday||0).toFixed(2)}`,
-            part1: `₱${((s.sunday||0)+(s.monday||0)+(s.tuesday||0)).toFixed(2)}`,
-            part2: `₱${((s.wednesday||0)+(s.thursday||0)+(s.friday||0)+(s.saturday||0)).toFixed(2)}`,
+            sunday: `₱${(s.daily?.Sunday || 0).toFixed(2)}`,
+            monday: `₱${(s.daily?.Monday || 0).toFixed(2)}`,
+            tuesday: `₱${(s.daily?.Tuesday || 0).toFixed(2)}`,
+            wednesday: `₱${(s.daily?.Wednesday || 0).toFixed(2)}`,
+            thursday: `₱${(s.daily?.Thursday || 0).toFixed(2)}`,
+            friday: `₱${(s.daily?.Friday || 0).toFixed(2)}`,
+            saturday: `₱${(s.daily?.Saturday || 0).toFixed(2)}`,
+            part1: `₱${((s.daily?.Sunday || 0) + (s.daily?.Monday || 0) + (s.daily?.Tuesday || 0)).toFixed(2)}`,
+            part2: `₱${((s.daily?.Wednesday || 0) + (s.daily?.Thursday || 0) + (s.daily?.Friday || 0) + (s.daily?.Saturday || 0)).toFixed(2)}`,
             total: `₱${(s.commission||0).toFixed(2)}`
         }));
         const columns = [
@@ -6158,15 +6440,15 @@
             position: s.position,
             tier: `${s.tier}%`,
             jobs: s.jobs || 0,
-            sunday: `₱${(s.sunday||0).toFixed(2)}`,
-            monday: `₱${(s.monday||0).toFixed(2)}`,
-            tuesday: `₱${(s.tuesday||0).toFixed(2)}`,
-            wednesday: `₱${(s.wednesday||0).toFixed(2)}`,
-            thursday: `₱${(s.thursday||0).toFixed(2)}`,
-            friday: `₱${(s.friday||0).toFixed(2)}`,
-            saturday: `₱${(s.saturday||0).toFixed(2)}`,
-            part1: `₱${((s.sunday||0)+(s.monday||0)+(s.tuesday||0)).toFixed(2)}`,
-            part2: `₱${((s.wednesday||0)+(s.thursday||0)+(s.friday||0)+(s.saturday||0)).toFixed(2)}`,
+            sunday: `₱${(s.daily?.Sunday || 0).toFixed(2)}`,
+            monday: `₱${(s.daily?.Monday || 0).toFixed(2)}`,
+            tuesday: `₱${(s.daily?.Tuesday || 0).toFixed(2)}`,
+            wednesday: `₱${(s.daily?.Wednesday || 0).toFixed(2)}`,
+            thursday: `₱${(s.daily?.Thursday || 0).toFixed(2)}`,
+            friday: `₱${(s.daily?.Friday || 0).toFixed(2)}`,
+            saturday: `₱${(s.daily?.Saturday || 0).toFixed(2)}`,
+            part1: `₱${((s.daily?.Sunday || 0) + (s.daily?.Monday || 0) + (s.daily?.Tuesday || 0)).toFixed(2)}`,
+            part2: `₱${((s.daily?.Wednesday || 0) + (s.daily?.Thursday || 0) + (s.daily?.Friday || 0) + (s.daily?.Saturday || 0)).toFixed(2)}`,
             total: `₱${(s.commission||0).toFixed(2)}`
         }));
         const columns = [
@@ -6332,7 +6614,7 @@
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.6</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.7</span></span>
                     </div>
                 </div>
 
@@ -6372,26 +6654,25 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.6 | Auto-Weekly Commission Sync | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.7 | Auto-Weekly Commission Sync & Archive | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.6 (Auto-Weekly Commission)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.7 (Auto-Weekly Commission + Archive)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
-    console.log('%c📊 Auto-Commission on Service Complete | Real-time Sync Enabled', 'color: #ffaa00;');
-    console.log(`%c🌐 Firebase: ${firebaseInitialized && isFirebasePrimary ? 'Connected (Online)' : 'Disconnected (Offline)'}`, 'color: #ffaa00;');
     console.log('%c📊 Weekly Commission auto-sync from POS & Open Services (Real-time)', 'color: #00ff88;');
+    console.log('%c📋 Weekly reports auto-archive after Saturday | Historical tracking', 'color: #00d4ff;');
     console.log('%c📈 Interactive Sales Chart with Daily/Weekly/Monthly toggle views', 'color: #00d4ff;');
     console.log('%c📊 Today\'s Commission = Commission from Today\'s Transactions only', 'color: #00ff88;');
     console.log('%c⚡ Reorganized Admin Panel: Daily Transactions & Weekly Commission in sidebar', 'color: #00d4ff;');
-    console.log('%c🔄 v8.7.6: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
+    console.log('%c🔄 v8.7.7: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
     console.log('%c👥 Customer Database with full transaction history and credit tracking', 'color: #00d4ff;');
     console.log('%c🛒 POS Panel fully functional with staff assignment, size selection, and open services', 'color: #00d4ff;');
-    console.log('%c📋 Auto-Weekly Commission calculated from ALL transactions and open services', 'color: #00d4ff;');
+    console.log('%c📋 Auto-Weekly Commission with daily breakdown and archive system', 'color: #00d4ff;');
     if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect online', 'color: #ff6b6b;');
     } else {
