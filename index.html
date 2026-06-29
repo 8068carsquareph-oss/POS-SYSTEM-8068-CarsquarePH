@@ -3090,8 +3090,10 @@
             // Update dashboard stats
             updateDashboardStats();
 
-            alert(`✅ SALE COMPLETED!\nTotal: ₱${total.toFixed(2)}${isCredit ? '\n⚠️ CREDIT (UTANG) - PENDING PAYMENT' : ''}`);
+            // Automatic receipt printing - always print after successful sale
             printReceipt(transaction);
+
+            alert(`✅ SALE COMPLETED!\nTotal: ₱${total.toFixed(2)}${isCredit ? '\n⚠️ CREDIT (UTANG) - PENDING PAYMENT' : ''}`);
             posCart = [];
             selectedCustomer = null;
             vehicleInfo = { plate: "", model: "", size: "Medium" };
@@ -7074,6 +7076,7 @@
                 <div class="mt-1 text-green-400">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</div>
                 <div class="mt-1 text-green-400">🚗 Vehicle History Search by Plate Number</div>
                 <div class="mt-1 text-green-400">📊 Transaction Summary with 10 key metrics</div>
+                <div class="mt-1 text-green-400">🖨️ Automatic receipt printing after every sale</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🌐 Firebase: Connected (Online) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🌐 Firebase: Disconnected - Using local cache</div>`}
                 <div class="mt-1 text-green-400">🔧 Data sanitization removes undefined values before syncing</div>
                 <div class="mt-1 text-cyan-400">🎨 Customizable UI Labels for panels and modals</div>
@@ -7125,6 +7128,7 @@
                     <p class="text-green-400 mt-1">📈 Transaction Summary with 10 key metrics</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
                     <p class="text-green-400 mt-1">⚡ Offline support - data syncs when connection is restored</p>
+                    <p class="text-green-400 mt-1">🖨️ Automatic receipt printing after every sale</p>
                 </div>
             </div>
         </div></div>`;
@@ -8681,6 +8685,7 @@
         console.log('%c🛒 POS Panel fully functional with staff assignment, size selection, and open services',
             'color: #00d4ff;');
         console.log('%c📋 Auto-Weekly Commission with daily breakdown and archive system', 'color: #00d4ff;');
+        console.log('%c🖨️ Automatic receipt printing after every successful sale', 'color: #00ff88;');
         if (!firebaseInitialized || !isFirebasePrimary) {
             console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect online',
                 'color: #ff6b6b;');
@@ -8688,6 +8693,7 @@
             console.log('%c✅ Auto-sync enabled - all data saved to Firebase in real-time', 'color: #00ff88;');
         }
         console.log('%c🔍 Search: Plate, Receipt, Customer, Vehicle, Staff, Date Range', 'color: #00d4ff;');
+        console.log('%c💰 All exports and commissions displayed in ₱ (Philippine Peso)', 'color: #00d4ff;');
     </script>
 </body>
 </html>
