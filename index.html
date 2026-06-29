@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>8068 CAR SQUARE | POS System v8.7.7</title>
+    <title>8068 CAR SQUARE | POS System v8.8.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -754,10 +754,11 @@
                 if (!appData.systemSettings.enableNotifications) appData.systemSettings.enableNotifications = true;
                 if (!appData.systemSettings.inactivityTimeout) appData.systemSettings.inactivityTimeout = 30;
                 if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
-                // Initialize weekly commission archives
+                // Initialize commission reports
+                if (!appData.commissionReports) appData.commissionReports = { weekly: [], monthly: [], yearly: [] };
                 if (!appData.commissionWeekly) appData.commissionWeekly = { current: null, archives: [] };
                 if (!appData.commissionWeekly.current) {
-                    appData.commissionWeekly.current = { weekStart: '', staff: {}, totals: {} };
+                    appData.commissionWeekly.current = { weekStart: '', weekEnd: '', staff: {}, totals: {} };
                 }
                 dataLoaded = true;
                 addFirebaseLog('📂 Loaded from localStorage (cache)', 'info');
@@ -825,6 +826,11 @@
                         appData.reports = data.reports;
                         hasChanges = true;
                     }
+                    if (!appData.commissionReports) appData.commissionReports = { weekly: [], monthly: [], yearly: [] };
+                    if (data.commissionReports) {
+                        appData.commissionReports = data.commissionReports;
+                        hasChanges = true;
+                    }
                     if (!appData.systemSettings.logoSize) appData.systemSettings.logoSize = 80;
                     if (!appData.systemSettings.uiLabels) {
                         appData.systemSettings.uiLabels = {
@@ -839,7 +845,7 @@
                     if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
                     if (!appData.commissionWeekly) appData.commissionWeekly = { current: null, archives: [] };
                     if (!appData.commissionWeekly.current) {
-                        appData.commissionWeekly.current = { weekStart: '', staff: {}, totals: {} };
+                        appData.commissionWeekly.current = { weekStart: '', weekEnd: '', staff: {}, totals: {} };
                     }
                     dataLoaded = true;
                     if (hasChanges) {
@@ -900,9 +906,10 @@
             nextIds: appData.nextIds || {},
             commissionMatrix: appData.commissionMatrix || {},
             reports: appData.reports || { weekly: [], monthly: [], yearly: [] },
+            commissionReports: appData.commissionReports || { weekly: [], monthly: [], yearly: [] },
             commissionWeekly: appData.commissionWeekly || { current: null, archives: [] },
             lastUpdated: new Date().toISOString(),
-            version: '8.7.7'
+            version: '8.8.0'
         };
 
         const dataToSync = sanitizeDataForFirebase(rawData);
@@ -1117,6 +1124,7 @@
         nextIds: { transaction: 100, customer: 50, expense: 20, service: 50, openService: 1, credit: 1 },
         commissionMatrix: initializeCommissionMatrix(),
         reports: { weekly: [], monthly: [], yearly: [] },
+        commissionReports: { weekly: [], monthly: [], yearly: [] },
         commissionWeekly: { current: null, archives: [] }
     };
 
@@ -1173,6 +1181,7 @@
             if (!appData.systemSettings.receiptHeader) appData.systemSettings.receiptHeader = 'OFFICIAL RECEIPT';
             if (appData.systemSettings.showVAT === undefined) appData.systemSettings.showVAT = false;
             if (!appData.reports) appData.reports = { weekly: [], monthly: [], yearly: [] };
+            if (!appData.commissionReports) appData.commissionReports = { weekly: [], monthly: [], yearly: [] };
             if (!appData.systemSettings.logoSize) appData.systemSettings.logoSize = 80;
             if (!appData.systemSettings.uiLabels) {
                 appData.systemSettings.uiLabels = {
@@ -1187,7 +1196,7 @@
             if (!appData.systemSettings.chartDefaultPeriod) appData.systemSettings.chartDefaultPeriod = 'weekly';
             if (!appData.commissionWeekly) appData.commissionWeekly = { current: null, archives: [] };
             if (!appData.commissionWeekly.current) {
-                appData.commissionWeekly.current = { weekStart: '', staff: {}, totals: {} };
+                appData.commissionWeekly.current = { weekStart: '', weekEnd: '', staff: {}, totals: {} };
             }
             dataLoaded = true;
         } catch(e) {}
@@ -1258,313 +1267,467 @@
 
     function generateReceiptNo() { return "INV-" + new Date().getFullYear() + "-" + (appData.nextIds.transaction++); }
 
-    // ======================== RECALCULATE STAFF COMMISSIONS ========================
-    function recalculateStaffCommissions() {
+    // ======================== ENHANCED COMMISSION CALCULATIONS (Sunday-Saturday Cycle) ========================
+    
+    /**
+     * Gets the start of the commission week (Sunday) for a given date
+     * @param {Date} date - The date to get the week start for
+     * @returns {Date} - The Sunday at 12:00 AM of that week
+     */
+    function getWeekStart(date) {
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        const day = d.getDay(); // 0 = Sunday
+        d.setDate(d.getDate() - day);
+        return d;
+    }
+
+    /**
+     * Gets the end of the commission week (Saturday) for a given date
+     * @param {Date} date - The date to get the week end for
+     * @returns {Date} - The Saturday at 11:59 PM of that week
+     */
+    function getWeekEnd(date) {
+        const d = getWeekStart(date);
+        d.setDate(d.getDate() + 6);
+        d.setHours(23, 59, 59, 999);
+        return d;
+    }
+
+    /**
+     * Gets the week range label for a given date
+     * @param {Date} date - The date to get the week label for
+     * @returns {string} - Formatted week label
+     */
+    function getWeekLabel(date) {
+        const start = getWeekStart(date);
+        const end = getWeekEnd(date);
+        const options = { month: 'long', day: 'numeric', year: 'numeric' };
+        return `Sunday, ${start.toLocaleDateString('en-US', options)} – Saturday, ${end.toLocaleDateString('en-US', options)}`;
+    }
+
+    /**
+     * Gets the week identifier (YYYY-WW) for a given date based on Sunday-Saturday cycle
+     */
+    function getWeekId(date) {
+        const start = getWeekStart(date);
+        const year = start.getFullYear();
+        const jan1 = new Date(year, 0, 1);
+        const days = Math.floor((start - jan1) / (24 * 60 * 60 * 1000));
+        const weekNum = Math.ceil((days + 1) / 7);
+        return `${year}-W${String(weekNum).padStart(2, '0')}`;
+    }
+
+    /**
+     * Recalculates all commission reports from scratch using the Sunday-Saturday cycle
+     * This is the master function that ensures all reports are accurate
+     */
+    function recalculateAllCommissions() {
+        console.log('🔄 Recalculating all commission reports (Sunday-Saturday cycle)...');
+        
+        // Reset staff commission accumulators
         appData.staff.forEach(s => {
             s.totalCommission = 0;
             s.jobsCompleted = 0;
             s.salesGenerated = 0;
             s.weeklyBreakdown = { Sunday: 0, Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0 };
-            s.weekPart1Total = 0;
-            s.weekPart2Total = 0;
+            s.weeklyCommission = 0;
             s.monthlyCommission = 0;
-            s.dailyCommission = 0;
+            s.yearlyCommission = 0;
         });
 
+        // Reset commission reports
+        appData.commissionReports = { weekly: [], monthly: [], yearly: [] };
+        
+        // Group transactions by week, month, year
+        const weeklyGroups = {};
+        const monthlyGroups = {};
+        const yearlyGroups = {};
+        
+        // Process all transactions
         appData.transactions.forEach(t => {
-            if (t.staffCommissions) {
-                const txDate = new Date(t.date);
-                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
-                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
-                    const staff = appData.staff.find(s => s.id === parseInt(staffId));
-                    if (staff) {
-                        const commission = data.commission || 0;
-                        staff.totalCommission = (staff.totalCommission || 0) + commission;
-                        staff.jobsCompleted = (staff.jobsCompleted || 0) + (data.jobs || 1);
-                        staff.salesGenerated = (staff.salesGenerated || 0) + (t.total || 0);
-                        if (staff.weeklyBreakdown) {
-                            staff.weeklyBreakdown[dayName] = (staff.weeklyBreakdown[dayName] || 0) + commission;
-                        }
-                        staff.monthlyCommission = (staff.monthlyCommission || 0) + commission;
-                        staff.dailyCommission = (staff.dailyCommission || 0) + commission;
+            if (!t.staffCommissions) return;
+            const txDate = new Date(t.date);
+            const weekStart = getWeekStart(txDate);
+            const weekId = getWeekId(txDate);
+            const monthKey = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
+            const yearKey = `${txDate.getFullYear()}`;
+            
+            // Initialize groups
+            if (!weeklyGroups[weekId]) {
+                weeklyGroups[weekId] = { 
+                    weekStart: weekStart.toISOString(),
+                    weekEnd: getWeekEnd(txDate).toISOString(),
+                    weekLabel: getWeekLabel(txDate),
+                    staff: {},
+                    totals: { commission: 0, sales: 0, jobs: 0, transactions: 0 },
+                    dailyBreakdown: {}
+                };
+            }
+            if (!monthlyGroups[monthKey]) {
+                monthlyGroups[monthKey] = { month: monthKey, staff: {}, totals: { commission: 0, sales: 0, jobs: 0, transactions: 0 } };
+            }
+            if (!yearlyGroups[yearKey]) {
+                yearlyGroups[yearKey] = { year: yearKey, staff: {}, totals: { commission: 0, sales: 0, jobs: 0, transactions: 0 } };
+            }
+            
+            // Initialize daily breakdown for week
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const dayName = dayNames[txDate.getDay()];
+            if (!weeklyGroups[weekId].dailyBreakdown[dayName]) {
+                weeklyGroups[weekId].dailyBreakdown[dayName] = { commission: 0, sales: 0, jobs: 0 };
+            }
+            
+            // Process staff commissions for this transaction
+            Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
+                const sid = parseInt(staffId);
+                const staffMember = appData.staff.find(s => s.id === sid);
+                if (!staffMember) return;
+                
+                const commission = data.commission || 0;
+                const jobs = data.jobs || 1;
+                const sales = t.total || 0;
+                
+                // Update staff totals
+                staffMember.totalCommission = (staffMember.totalCommission || 0) + commission;
+                staffMember.jobsCompleted = (staffMember.jobsCompleted || 0) + jobs;
+                staffMember.salesGenerated = (staffMember.salesGenerated || 0) + sales;
+                staffMember.weeklyBreakdown[dayName] = (staffMember.weeklyBreakdown[dayName] || 0) + commission;
+                staffMember.weeklyCommission = (staffMember.weeklyCommission || 0) + commission;
+                staffMember.monthlyCommission = (staffMember.monthlyCommission || 0) + commission;
+                staffMember.yearlyCommission = (staffMember.yearlyCommission || 0) + commission;
+                
+                // Update weekly group
+                if (!weeklyGroups[weekId].staff[sid]) {
+                    weeklyGroups[weekId].staff[sid] = {
+                        name: staffMember.name,
+                        position: staffMember.position,
+                        tier: staffMember.commissionTier,
+                        commission: 0,
+                        jobs: 0,
+                        sales: 0,
+                        daily: { Sunday: 0, Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0 }
+                    };
+                }
+                weeklyGroups[weekId].staff[sid].commission += commission;
+                weeklyGroups[weekId].staff[sid].jobs += jobs;
+                weeklyGroups[weekId].staff[sid].sales += sales;
+                weeklyGroups[weekId].staff[sid].daily[dayName] = (weeklyGroups[weekId].staff[sid].daily[dayName] || 0) + commission;
+                weeklyGroups[weekId].totals.commission += commission;
+                weeklyGroups[weekId].totals.sales += sales;
+                weeklyGroups[weekId].totals.jobs += jobs;
+                weeklyGroups[weekId].totals.transactions += 1;
+                weeklyGroups[weekId].dailyBreakdown[dayName].commission += commission;
+                weeklyGroups[weekId].dailyBreakdown[dayName].sales += sales;
+                weeklyGroups[weekId].dailyBreakdown[dayName].jobs += jobs;
+                
+                // Update monthly group
+                if (!monthlyGroups[monthKey].staff[sid]) {
+                    monthlyGroups[monthKey].staff[sid] = {
+                        name: staffMember.name,
+                        position: staffMember.position,
+                        tier: staffMember.commissionTier,
+                        commission: 0,
+                        jobs: 0,
+                        sales: 0
+                    };
+                }
+                monthlyGroups[monthKey].staff[sid].commission += commission;
+                monthlyGroups[monthKey].staff[sid].jobs += jobs;
+                monthlyGroups[monthKey].staff[sid].sales += sales;
+                monthlyGroups[monthKey].totals.commission += commission;
+                monthlyGroups[monthKey].totals.sales += sales;
+                monthlyGroups[monthKey].totals.jobs += jobs;
+                monthlyGroups[monthKey].totals.transactions += 1;
+                
+                // Update yearly group
+                if (!yearlyGroups[yearKey].staff[sid]) {
+                    yearlyGroups[yearKey].staff[sid] = {
+                        name: staffMember.name,
+                        position: staffMember.position,
+                        tier: staffMember.commissionTier,
+                        commission: 0,
+                        jobs: 0,
+                        sales: 0
+                    };
+                }
+                yearlyGroups[yearKey].staff[sid].commission += commission;
+                yearlyGroups[yearKey].staff[sid].jobs += jobs;
+                yearlyGroups[yearKey].staff[sid].sales += sales;
+                yearlyGroups[yearKey].totals.commission += commission;
+                yearlyGroups[yearKey].totals.sales += sales;
+                yearlyGroups[yearKey].totals.jobs += jobs;
+                yearlyGroups[yearKey].totals.transactions += 1;
+            });
+        });
+        
+        // Process completed open services
+        appData.openServices.forEach(s => {
+            if (s.completedAt && s.commissionProcessed && s.pendingCommission) {
+                const txDate = new Date(s.completedAt);
+                const weekId = getWeekId(txDate);
+                const monthKey = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
+                const yearKey = `${txDate.getFullYear()}`;
+                const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const dayName = dayNames[txDate.getDay()];
+                
+                // Initialize groups if needed
+                if (!weeklyGroups[weekId]) {
+                    weeklyGroups[weekId] = { 
+                        weekStart: getWeekStart(txDate).toISOString(),
+                        weekEnd: getWeekEnd(txDate).toISOString(),
+                        weekLabel: getWeekLabel(txDate),
+                        staff: {},
+                        totals: { commission: 0, sales: 0, jobs: 0, transactions: 0 },
+                        dailyBreakdown: {}
+                    };
+                }
+                if (!weeklyGroups[weekId].dailyBreakdown[dayName]) {
+                    weeklyGroups[weekId].dailyBreakdown[dayName] = { commission: 0, sales: 0, jobs: 0 };
+                }
+                if (!monthlyGroups[monthKey]) {
+                    monthlyGroups[monthKey] = { month: monthKey, staff: {}, totals: { commission: 0, sales: 0, jobs: 0, transactions: 0 } };
+                }
+                if (!yearlyGroups[yearKey]) {
+                    yearlyGroups[yearKey] = { year: yearKey, staff: {}, totals: { commission: 0, sales: 0, jobs: 0, transactions: 0 } };
+                }
+                
+                const staffMap = s.pendingCommission.staffMap || {};
+                Object.entries(staffMap).forEach(([staffId, data]) => {
+                    const sid = parseInt(staffId);
+                    const staffMember = appData.staff.find(st => st.id === sid);
+                    if (!staffMember) return;
+                    
+                    const commission = data.commission || 0;
+                    const jobs = data.jobs || 1;
+                    const sales = s.total || 0;
+                    
+                    // Update staff totals
+                    staffMember.totalCommission = (staffMember.totalCommission || 0) + commission;
+                    staffMember.jobsCompleted = (staffMember.jobsCompleted || 0) + jobs;
+                    staffMember.salesGenerated = (staffMember.salesGenerated || 0) + sales;
+                    staffMember.weeklyBreakdown[dayName] = (staffMember.weeklyBreakdown[dayName] || 0) + commission;
+                    staffMember.weeklyCommission = (staffMember.weeklyCommission || 0) + commission;
+                    staffMember.monthlyCommission = (staffMember.monthlyCommission || 0) + commission;
+                    staffMember.yearlyCommission = (staffMember.yearlyCommission || 0) + commission;
+                    
+                    // Weekly
+                    if (!weeklyGroups[weekId].staff[sid]) {
+                        weeklyGroups[weekId].staff[sid] = {
+                            name: staffMember.name,
+                            position: staffMember.position,
+                            tier: staffMember.commissionTier,
+                            commission: 0,
+                            jobs: 0,
+                            sales: 0,
+                            daily: { Sunday: 0, Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0 }
+                        };
                     }
+                    weeklyGroups[weekId].staff[sid].commission += commission;
+                    weeklyGroups[weekId].staff[sid].jobs += jobs;
+                    weeklyGroups[weekId].staff[sid].sales += sales;
+                    weeklyGroups[weekId].staff[sid].daily[dayName] = (weeklyGroups[weekId].staff[sid].daily[dayName] || 0) + commission;
+                    weeklyGroups[weekId].totals.commission += commission;
+                    weeklyGroups[weekId].totals.sales += sales;
+                    weeklyGroups[weekId].totals.jobs += jobs;
+                    weeklyGroups[weekId].totals.transactions += 1;
+                    weeklyGroups[weekId].dailyBreakdown[dayName].commission += commission;
+                    weeklyGroups[weekId].dailyBreakdown[dayName].sales += sales;
+                    weeklyGroups[weekId].dailyBreakdown[dayName].jobs += jobs;
+                    
+                    // Monthly
+                    if (!monthlyGroups[monthKey].staff[sid]) {
+                        monthlyGroups[monthKey].staff[sid] = {
+                            name: staffMember.name,
+                            position: staffMember.position,
+                            tier: staffMember.commissionTier,
+                            commission: 0,
+                            jobs: 0,
+                            sales: 0
+                        };
+                    }
+                    monthlyGroups[monthKey].staff[sid].commission += commission;
+                    monthlyGroups[monthKey].staff[sid].jobs += jobs;
+                    monthlyGroups[monthKey].staff[sid].sales += sales;
+                    monthlyGroups[monthKey].totals.commission += commission;
+                    monthlyGroups[monthKey].totals.sales += sales;
+                    monthlyGroups[monthKey].totals.jobs += jobs;
+                    monthlyGroups[monthKey].totals.transactions += 1;
+                    
+                    // Yearly
+                    if (!yearlyGroups[yearKey].staff[sid]) {
+                        yearlyGroups[yearKey].staff[sid] = {
+                            name: staffMember.name,
+                            position: staffMember.position,
+                            tier: staffMember.commissionTier,
+                            commission: 0,
+                            jobs: 0,
+                            sales: 0
+                        };
+                    }
+                    yearlyGroups[yearKey].staff[sid].commission += commission;
+                    yearlyGroups[yearKey].staff[sid].jobs += jobs;
+                    yearlyGroups[yearKey].staff[sid].sales += sales;
+                    yearlyGroups[yearKey].totals.commission += commission;
+                    yearlyGroups[yearKey].totals.sales += sales;
+                    yearlyGroups[yearKey].totals.jobs += jobs;
+                    yearlyGroups[yearKey].totals.transactions += 1;
                 });
             }
         });
-
-        appData.staff.forEach(s => {
-            if (s.weeklyBreakdown) {
-                s.weekPart1Total = (s.weeklyBreakdown.Sunday || 0) + (s.weeklyBreakdown.Monday || 0) + (s.weeklyBreakdown.Tuesday || 0);
-                s.weekPart2Total = (s.weeklyBreakdown.Wednesday || 0) + (s.weeklyBreakdown.Thursday || 0) + (s.weeklyBreakdown.Friday || 0) + (s.weeklyBreakdown.Saturday || 0);
+        
+        // Sort and store weekly reports (by week start date, newest first)
+        const sortedWeekIds = Object.keys(weeklyGroups).sort((a, b) => {
+            const dateA = new Date(weeklyGroups[a].weekStart);
+            const dateB = new Date(weeklyGroups[b].weekStart);
+            return dateB - dateA;
+        });
+        
+        appData.commissionReports.weekly = sortedWeekIds.map(id => weeklyGroups[id]);
+        
+        // Sort monthly reports
+        const sortedMonths = Object.keys(monthlyGroups).sort((a, b) => b.localeCompare(a));
+        appData.commissionReports.monthly = sortedMonths.map(key => monthlyGroups[key]);
+        
+        // Sort yearly reports
+        const sortedYears = Object.keys(yearlyGroups).sort((a, b) => b.localeCompare(a));
+        appData.commissionReports.yearly = sortedYears.map(key => yearlyGroups[key]);
+        
+        // Update current week data for dashboard display
+        const now = new Date();
+        const currentWeekId = getWeekId(now);
+        if (weeklyGroups[currentWeekId]) {
+            appData.commissionWeekly.current = {
+                weekStart: weeklyGroups[currentWeekId].weekStart,
+                weekEnd: weeklyGroups[currentWeekId].weekEnd,
+                weekLabel: weeklyGroups[currentWeekId].weekLabel,
+                staff: weeklyGroups[currentWeekId].staff,
+                totals: weeklyGroups[currentWeekId].totals,
+                dailyBreakdown: weeklyGroups[currentWeekId].dailyBreakdown
+            };
+        } else {
+            // If no transactions this week, create empty structure
+            const weekStart = getWeekStart(now);
+            const weekEnd = getWeekEnd(now);
+            appData.commissionWeekly.current = {
+                weekStart: weekStart.toISOString(),
+                weekEnd: weekEnd.toISOString(),
+                weekLabel: getWeekLabel(now),
+                staff: {},
+                totals: { commission: 0, sales: 0, jobs: 0, transactions: 0 },
+                dailyBreakdown: {
+                    Sunday: { commission: 0, sales: 0, jobs: 0 },
+                    Monday: { commission: 0, sales: 0, jobs: 0 },
+                    Tuesday: { commission: 0, sales: 0, jobs: 0 },
+                    Wednesday: { commission: 0, sales: 0, jobs: 0 },
+                    Thursday: { commission: 0, sales: 0, jobs: 0 },
+                    Friday: { commission: 0, sales: 0, jobs: 0 },
+                    Saturday: { commission: 0, sales: 0, jobs: 0 }
+                }
+            };
+        }
+        
+        // Archive completed weeks (weeks that have ended)
+        const archives = [];
+        const currentWeekStart = getWeekStart(now);
+        Object.keys(weeklyGroups).forEach(id => {
+            const weekStart = new Date(weeklyGroups[id].weekStart);
+            if (weekStart < currentWeekStart) {
+                archives.push({
+                    weekStart: weeklyGroups[id].weekStart,
+                    weekEnd: weeklyGroups[id].weekEnd,
+                    weekLabel: weeklyGroups[id].weekLabel,
+                    staff: weeklyGroups[id].staff,
+                    totals: weeklyGroups[id].totals,
+                    dailyBreakdown: weeklyGroups[id].dailyBreakdown,
+                    archivedAt: new Date().toISOString()
+                });
             }
         });
-
-        saveToLocal();
-    }
-
-    // ======================== ENHANCED WEEKLY COMMISSION WITH ARCHIVE ========================
-    function getWeekDates(weekStart) {
-        const start = new Date(weekStart);
-        const end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        return {
-            start: start,
-            end: end,
-            startStr: start.toISOString().slice(0,10),
-            endStr: end.toISOString().slice(0,10),
-            label: `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-        };
-    }
-
-    function getWeekStartForDate(date) {
-        const d = new Date(date);
-        d.setDate(d.getDate() - d.getDay());
-        d.setHours(0, 0, 0, 0);
-        return d.toISOString().slice(0,10);
-    }
-
-    function calculateWeeklyCommission() {
-        const now = new Date();
-        const currentWeekStart = getWeekStartForDate(now);
-        const weekInfo = getWeekDates(currentWeekStart);
+        // Sort archives by week start (newest first)
+        archives.sort((a, b) => new Date(b.weekStart) - new Date(a.weekStart));
+        appData.commissionWeekly.archives = archives;
         
-        // Initialize current week data
-        const weeklyData = { 
-            weekStart: currentWeekStart,
-            weekLabel: weekInfo.label,
+        // Update periodic reports (for backward compatibility)
+        appData.reports.weekly = appData.commissionReports.weekly;
+        appData.reports.monthly = appData.commissionReports.monthly;
+        appData.reports.yearly = appData.commissionReports.yearly;
+        
+        saveToLocal();
+        console.log('✅ Commission reports recalculated successfully');
+        return true;
+    }
+
+    /**
+     * Gets the current week's commission data
+     */
+    function getWeeklyCommission() {
+        return appData.commissionWeekly.current || { 
+            weekStart: '', 
+            weekEnd: '', 
+            weekLabel: '', 
             staff: {}, 
             totals: { commission: 0, sales: 0, jobs: 0 },
             dailyBreakdown: {}
         };
-        
-        // Get all days of the week
-        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        days.forEach(day => {
-            weeklyData.dailyBreakdown[day] = { commission: 0, sales: 0, jobs: 0 };
-        });
-        
-        // Initialize staff entries
-        appData.staff.forEach(s => {
-            weeklyData.staff[s.id] = {
-                name: s.name,
-                position: s.position,
-                tier: s.commissionTier,
-                commission: 0,
-                jobs: 0,
-                sales: 0,
-                daily: {}
-            };
-            days.forEach(day => {
-                weeklyData.staff[s.id].daily[day] = 0;
-            });
-        });
-        
-        // Process all transactions for the current week
-        appData.transactions.forEach(t => {
-            if (t.date >= currentWeekStart && t.staffCommissions) {
-                const txDate = new Date(t.date);
-                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
-                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
-                    const sid = parseInt(staffId);
-                    if (weeklyData.staff[sid]) {
-                        const comm = data.commission || 0;
-                        weeklyData.staff[sid].commission += comm;
-                        weeklyData.staff[sid].jobs += (data.jobs || 1);
-                        weeklyData.staff[sid].sales += (t.total || 0);
-                        weeklyData.staff[sid].daily[dayName] = (weeklyData.staff[sid].daily[dayName] || 0) + comm;
-                        weeklyData.totals.commission += comm;
-                        weeklyData.totals.sales += (t.total || 0);
-                        weeklyData.totals.jobs += (data.jobs || 1);
-                        weeklyData.dailyBreakdown[dayName].commission += comm;
-                        weeklyData.dailyBreakdown[dayName].sales += (t.total || 0);
-                        weeklyData.dailyBreakdown[dayName].jobs += (data.jobs || 1);
-                    }
-                });
-            }
-        });
-        
-        // Process open services completed this week
-        appData.openServices.forEach(s => {
-            if (s.completedAt && s.completedAt >= currentWeekStart && s.commissionProcessed && s.pendingCommission) {
-                const txDate = new Date(s.completedAt);
-                const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][txDate.getDay()];
-                const staffMap = s.pendingCommission.staffMap || {};
-                Object.entries(staffMap).forEach(([staffId, data]) => {
-                    const sid = parseInt(staffId);
-                    if (weeklyData.staff[sid]) {
-                        const comm = data.commission || 0;
-                        weeklyData.staff[sid].commission += comm;
-                        weeklyData.staff[sid].jobs += (data.jobs || 1);
-                        weeklyData.staff[sid].sales += s.total;
-                        weeklyData.staff[sid].daily[dayName] = (weeklyData.staff[sid].daily[dayName] || 0) + comm;
-                        weeklyData.totals.commission += comm;
-                        weeklyData.totals.sales += s.total;
-                        weeklyData.totals.jobs += (data.jobs || 1);
-                        weeklyData.dailyBreakdown[dayName].commission += comm;
-                        weeklyData.dailyBreakdown[dayName].sales += s.total;
-                        weeklyData.dailyBreakdown[dayName].jobs += (data.jobs || 1);
-                    }
-                });
-            }
-        });
-        
-        // Check if we need to archive the previous week (if week has changed)
-        if (appData.commissionWeekly.current && appData.commissionWeekly.current.weekStart !== currentWeekStart) {
-            // Archive the previous week
-            const prevWeek = appData.commissionWeekly.current;
-            if (prevWeek.weekStart && Object.keys(prevWeek.staff).length > 0) {
-                if (!appData.commissionWeekly.archives) appData.commissionWeekly.archives = [];
-                appData.commissionWeekly.archives.push({
-                    weekStart: prevWeek.weekStart,
-                    weekLabel: prevWeek.weekLabel,
-                    staff: prevWeek.staff,
-                    totals: prevWeek.totals,
-                    dailyBreakdown: prevWeek.dailyBreakdown,
-                    archivedAt: new Date().toISOString()
-                });
-                // Keep only last 52 weeks
-                if (appData.commissionWeekly.archives.length > 52) {
-                    appData.commissionWeekly.archives = appData.commissionWeekly.archives.slice(-52);
-                }
-            }
-        }
-        
-        // Store the current week data
-        appData.commissionWeekly.current = weeklyData;
-        saveToLocal();
-        return weeklyData;
     }
 
-    function getWeeklyCommission() {
-        const now = new Date();
-        const currentWeekStart = getWeekStartForDate(now);
-        
-        // Check if we need to recalculate (new week or no data)
-        if (!appData.commissionWeekly.current || appData.commissionWeekly.current.weekStart !== currentWeekStart) {
-            return calculateWeeklyCommission();
-        }
-        
-        // Check for new transactions since last calc
-        let needsRecalc = false;
-        const lastCalcTime = localStorage.getItem('8068_weekly_calc_time');
-        if (lastCalcTime) {
-            const lastCalc = new Date(lastCalcTime);
-            appData.transactions.forEach(t => {
-                if (new Date(t.date) > lastCalc) needsRecalc = true;
-            });
-            appData.openServices.forEach(s => {
-                if (s.completedAt && new Date(s.completedAt) > lastCalc) needsRecalc = true;
-            });
-        } else {
-            needsRecalc = true;
-        }
-        
-        if (needsRecalc) {
-            return calculateWeeklyCommission();
-        }
-        
-        return appData.commissionWeekly.current;
+    /**
+     * Gets a specific week's commission data by week start date
+     */
+    function getCommissionWeek(weekStartDate) {
+        const weekId = getWeekId(new Date(weekStartDate));
+        const weekData = appData.commissionReports.weekly.find(w => {
+            const wStart = new Date(w.weekStart);
+            return getWeekId(wStart) === weekId;
+        });
+        return weekData || null;
     }
 
-    function triggerWeeklyCommissionUpdate() {
-        localStorage.setItem('8068_weekly_calc_time', new Date().toISOString());
-        calculateWeeklyCommission();
-        if (currentAdminPanel === 'weeklycommission' || currentView === 'commission') {
+    /**
+     * Gets monthly commission data for a specific month
+     */
+    function getCommissionMonth(year, month) {
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        return appData.commissionReports.monthly.find(m => m.month === monthKey) || null;
+    }
+
+    /**
+     * Gets yearly commission data for a specific year
+     */
+    function getCommissionYear(year) {
+        return appData.commissionReports.yearly.find(y => y.year === String(year)) || null;
+    }
+
+    /**
+     * Triggers a full recalculation of all commission data
+     * Call this after any transaction that affects commissions
+     */
+    function refreshAllCommissions() {
+        recalculateAllCommissions();
+        if (currentView === 'dashboard' || currentView === 'commission' || currentView === 'admin') {
             renderApp();
         }
-        if (currentView === 'dashboard') {
-            renderApp();
-        }
+    }
+
+    // ======================== RECALCULATE STAFF COMMISSIONS (Legacy support) ========================
+    function recalculateStaffCommissions() {
+        // This function is now handled by recalculateAllCommissions()
+        // But we keep it for backward compatibility
+        recalculateAllCommissions();
     }
 
     // ======================== GENERATE PERIODIC REPORTS ========================
     function generatePeriodicReport(period) {
-        const now = new Date();
-        let reportData = {
-            period: period,
-            generatedAt: now.toISOString(),
-            staffCommissions: {},
-            totalSales: 0,
-            totalCommission: 0,
-            totalTransactions: 0,
-            breakdown: {}
-        };
-
-        let filteredTx = [];
-        if (period === 'weekly') {
-            const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay());
-            const weekStartStr = weekStart.toISOString().slice(0,10);
-            filteredTx = appData.transactions.filter(t => t.date >= weekStartStr);
-            reportData.periodLabel = `Week of ${weekStartStr}`;
-        } else if (period === 'monthly') {
-            const month = now.getMonth();
-            const year = now.getFullYear();
-            filteredTx = appData.transactions.filter(t => {
-                const d = new Date(t.date);
-                return d.getMonth() === month && d.getFullYear() === year;
-            });
-            reportData.periodLabel = `${now.toLocaleString('default', { month: 'long' })} ${year}`;
-        } else if (period === 'yearly') {
-            const year = now.getFullYear();
-            filteredTx = appData.transactions.filter(t => new Date(t.date).getFullYear() === year);
-            reportData.periodLabel = `Year ${year}`;
-        }
-
-        reportData.totalTransactions = filteredTx.length;
-        reportData.totalSales = filteredTx.reduce((s, t) => s + t.total, 0);
-
-        const staffMap = {};
-        appData.staff.forEach(s => {
-            staffMap[s.id] = {
-                name: s.name,
-                position: s.position,
-                tier: s.commissionTier,
-                commission: 0,
-                jobs: 0,
-                sales: 0
-            };
-        });
-
-        filteredTx.forEach(t => {
-            if (t.staffCommissions) {
-                Object.entries(t.staffCommissions).forEach(([staffId, data]) => {
-                    const sid = parseInt(staffId);
-                    if (staffMap[sid]) {
-                        staffMap[sid].commission += (data.commission || 0);
-                        staffMap[sid].jobs += (data.jobs || 1);
-                        staffMap[sid].sales += (t.total || 0);
-                    }
-                });
-            }
-        });
-
-        reportData.staffCommissions = staffMap;
-        reportData.totalCommission = Object.values(staffMap).reduce((sum, s) => sum + s.commission, 0);
-
-        if (!appData.reports) appData.reports = { weekly: [], monthly: [], yearly: [] };
-        if (period === 'weekly') {
-            appData.reports.weekly.push(reportData);
-            if (appData.reports.weekly.length > 52) appData.reports.weekly.shift();
-        } else if (period === 'monthly') {
-            appData.reports.monthly.push(reportData);
-            if (appData.reports.monthly.length > 12) appData.reports.monthly.shift();
-        } else if (period === 'yearly') {
-            appData.reports.yearly.push(reportData);
-            if (appData.reports.yearly.length > 10) appData.reports.yearly.shift();
-        }
-
-        saveToLocal();
-        return reportData;
+        // Now handled by recalculateAllCommissions()
+        recalculateAllCommissions();
+        const reports = appData.commissionReports[period] || [];
+        return reports.length > 0 ? reports[0] : null;
     }
 
     function getPeriodicReport(period) {
-        if (!appData.reports) appData.reports = { weekly: [], monthly: [], yearly: [] };
-        const reports = appData.reports[period] || [];
-        if (reports.length === 0) {
-            return generatePeriodicReport(period);
-        }
-        return reports[reports.length - 1];
+        const reports = appData.commissionReports[period] || [];
+        return reports.length > 0 ? reports[0] : null;
     }
 
     // ======================== EXPORT FUNCTIONS ========================
@@ -1575,8 +1738,7 @@
             const todayStr = now.toISOString().slice(0,10);
             filtered = appData.transactions.filter(t => t.date.startsWith(todayStr));
         } else if (period === 'weekly') {
-            const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay());
+            const weekStart = getWeekStart(now);
             const weekStartStr = weekStart.toISOString().slice(0,10);
             filtered = appData.transactions.filter(t => t.date >= weekStartStr);
         } else if (period === 'monthly') {
@@ -1671,7 +1833,7 @@
     };
 
     window.exportCommissionReport = function() {
-        recalculateStaffCommissions();
+        recalculateAllCommissions();
         const data = appData.staff.map(s => ({
             name: s.name,
             position: s.position,
@@ -1812,7 +1974,7 @@
                     ${appData.systemSettings.appIcon ? `<img src="${appData.systemSettings.appIcon}" class="mx-auto max-h-20 mb-4 rounded-lg">` : ''}
                     <h2 class="text-3xl font-bold glow-text">${appData.systemSettings.companyName}</h2>
                     <p class="text-gray-400 text-sm">${appData.systemSettings.tagline}</p>
-                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.7.7</p>
+                    <p class="text-cyan-400 text-xs mt-2">Enterprise POS System v8.8.0</p>
                     <p class="text-xs text-green-400 mt-1"><i class="fas fa-check-circle"></i> All Export & Print Functions Working</p>
                     <p class="text-xs text-cyan-400 mt-1"><i class="fas fa-cloud"></i> ${firebaseInitialized && isFirebasePrimary ? 'Online Mode' : 'Offline Mode'}</p>
                 </div>
@@ -2135,11 +2297,10 @@
         }
         
         saveToLocal();
-        recalculateStaffCommissions();
+        recalculateAllCommissions(); // Full recalculation
         generatePeriodicReport('weekly');
         generatePeriodicReport('monthly');
         generatePeriodicReport('yearly');
-        triggerWeeklyCommissionUpdate();
         addActivityLog('Sale Completed', `Transaction ${transaction.id} - ₱${total.toFixed(2)} - ${selectedPayment}`);
         alert(`✅ SALE COMPLETED!\nTotal: ₱${total.toFixed(2)}${isCredit ? '\n⚠️ CREDIT (UTANG) - PENDING PAYMENT' : ''}`);
         printReceipt(transaction);
@@ -2435,7 +2596,7 @@
                 service.completedAt = new Date().toISOString();
                 processOpenServiceCommission(service, true);
                 addActivityLog('Open Service Completed', `${service.customer} - ₱${service.total.toFixed(2)}`);
-                triggerWeeklyCommissionUpdate();
+                recalculateAllCommissions(); // Full refresh
             }
             saveToLocal();
             renderApp();
@@ -2533,11 +2694,7 @@
             delete service.pendingCommission;
             
             saveToLocal();
-            recalculateStaffCommissions();
-            generatePeriodicReport('weekly');
-            generatePeriodicReport('monthly');
-            generatePeriodicReport('yearly');
-            triggerWeeklyCommissionUpdate();
+            recalculateAllCommissions(); // Full refresh
             renderApp();
         }
     }
@@ -2643,7 +2800,7 @@
             };
             appData.transactions.unshift(transaction);
             saveToLocal();
-            recalculateStaffCommissions();
+            recalculateAllCommissions();
         }
         
         if (paymentMethod === 'Credit (Utang)') {
@@ -2664,11 +2821,7 @@
         service.paidAt = new Date().toISOString();
         service.status = 'paid';
         saveToLocal();
-        recalculateStaffCommissions();
-        generatePeriodicReport('weekly');
-        generatePeriodicReport('monthly');
-        generatePeriodicReport('yearly');
-        triggerWeeklyCommissionUpdate();
+        recalculateAllCommissions();
         addActivityLog('Payment Completed', `${service.customer} - ₱${total.toFixed(2)} - ${paymentMethod}`);
         alert(`✅ Payment Completed!\nTotal: ₱${total.toFixed(2)}`);
         
@@ -2879,7 +3032,7 @@
     // ======================== STAFF DASHBOARD ========================
     function renderStaffDashboard() {
         if(showLogin) return renderLogin();
-        recalculateStaffCommissions();
+        recalculateAllCommissions();
         const totalCommission = appData.staff.reduce((s, st) => s + (st.totalCommission || 0), 0);
         const totalJobs = appData.staff.reduce((s, st) => s + (st.jobsCompleted || 0), 0);
         const totalSales = appData.staff.reduce((s, st) => s + (st.salesGenerated || 0), 0);
@@ -3042,10 +3195,8 @@
         } else if (period === 'weekly') {
             const weeks = 12;
             for (let i = weeks - 1; i >= 0; i--) {
-                const weekStart = new Date(now);
-                weekStart.setDate(now.getDate() - (now.getDay() + 7 * i));
-                const weekEnd = new Date(weekStart);
-                weekEnd.setDate(weekStart.getDate() + 6);
+                const weekStart = getWeekStart(new Date(now.getTime() - 7 * i * 24 * 60 * 60 * 1000));
+                const weekEnd = getWeekEnd(weekStart);
                 const weekStartStr = weekStart.toISOString().slice(0,10);
                 const weekEndStr = weekEnd.toISOString().slice(0,10);
                 labels.push(`W${weeks - i}`);
@@ -3076,10 +3227,12 @@
     function renderDashboard() {
         if(showLogin) return renderLogin();
         
+        // Ensure commissions are up to date
+        recalculateAllCommissions();
+        
         const today = new Date().toISOString().slice(0,10);
         const todayTx = appData.transactions.filter(t => t.date.startsWith(today));
-        const weekStart = new Date();
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+        const weekStart = getWeekStart(new Date());
         const weekStartStr = weekStart.toISOString().slice(0,10);
         const weekTx = appData.transactions.filter(t => t.date >= weekStartStr);
         const monthTx = appData.transactions.filter(t => new Date(t.date).getMonth() === new Date().getMonth());
@@ -3088,7 +3241,7 @@
         const weeklySales = weekTx.reduce((s,t)=>s+t.total,0);
         const monthlySales = monthTx.reduce((s,t)=>s+t.total,0);
         
-        // TODAY'S COMMISSION - ONLY from today's transactions
+        // TODAY'S COMMISSION - from today's transactions
         const dailyCommission = appData.transactions
             .filter(t => t.date.startsWith(today) && t.staffCommissions)
             .reduce((sum, t) => sum + Object.values(t.staffCommissions).reduce((s, st) => s + (st.commission || 0), 0), 0);
@@ -3168,6 +3321,9 @@
             </div>
         `).join('') || '<div class="text-gray-400 text-center py-2 text-sm">No commission data</div>';
 
+        // Get current week label
+        const weekLabel = weeklyData.weekLabel || getWeekLabel(new Date());
+
         return `
             <div class="flex justify-between items-center mb-4">
                 <div class="flex items-center gap-3">
@@ -3231,14 +3387,13 @@
             <div class="bg-gray-800/30 border border-purple-500/20 rounded-lg p-3 mb-4 flex items-center justify-between flex-wrap gap-2">
                 <div class="flex items-center gap-3">
                     <span class="commission-live-badge text-purple-400"><i class="fas fa-sync fa-spin"></i> Live</span>
-                    <span class="text-sm text-gray-400">Weekly Commission Auto-Sync:</span>
+                    <span class="text-sm text-gray-400">Weekly Commission (${weekLabel}):</span>
                     <span class="text-sm font-bold text-purple-400">₱${weeklyCommission.toFixed(2)}</span>
                     <span class="text-xs text-gray-500">(${Object.keys(weeklyStaffData).length} staff active)</span>
-                    <span class="text-xs text-gray-500">${weeklyData.weekLabel || ''}</span>
                 </div>
                 <div class="flex gap-2">
                     <button onclick="navigateAdmin('weeklycommission')" class="bg-purple-600 px-3 py-1 rounded text-xs hover:bg-purple-700 transition">View Full Report</button>
-                    <button onclick="calculateWeeklyCommission(); renderApp();" class="bg-cyan-600 px-3 py-1 rounded text-xs hover:bg-cyan-700 transition"><i class="fas fa-sync"></i> Refresh</button>
+                    <button onclick="refreshAllCommissions(); renderApp();" class="bg-cyan-600 px-3 py-1 rounded text-xs hover:bg-cyan-700 transition"><i class="fas fa-sync"></i> Refresh</button>
                 </div>
             </div>
 
@@ -3538,13 +3693,13 @@
                         <div>Staff: ${appData.staff.length}</div>
                         <div>TX: ${appData.transactions.length}</div>
                         <div>Credit: ${(appData.credits || []).filter(c=>c.balance>0).length}</div>
-                        <div>v8.7.7</div>
+                        <div>v8.8.0</div>
                     </div>
                     <div class="mt-2 text-cyan-400 text-[10px]">Last Saved: ${new Date().toLocaleTimeString()}</div>
                     <div class="mt-1 text-green-400 text-[10px]">✅ Auto-Sync: ON | Auto-Commission: ON</div>
                     ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400 text-[10px]">🌐 Online Mode | Real-time sync enabled</div>` : `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Offline Mode | Using local cache</div>`}
-                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Weekly Commission auto-sync with archive (resets every Saturday)</div>
-                    <div class="mt-1 text-cyan-400 text-[10px]">📋 Weekly reports archived for monthly/yearly tracking</div>
+                    <div class="mt-1 text-cyan-400 text-[10px]">📊 Sunday-Saturday Weekly Commission Cycle</div>
+                    <div class="mt-1 text-cyan-400 text-[10px]">📋 Weekly reports auto-archived for historical tracking</div>
                     ${isUsingDemoConfig ? `<div class="mt-1 text-yellow-400 text-[10px]">⚠️ Using demo Firebase config - Configure your own in System Settings</div>` : ''}
                 </div>
             </div>
@@ -3983,7 +4138,7 @@
         const appIconHtml = s.appIcon ? `<img src="${s.appIcon}" class="app-icon-preview">` : 'No app icon uploaded';
         const timeout = s.inactivityTimeout || 30;
         
-        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.7.7</h3>
+        return `<h3 class="text-xl font-bold mb-4"><i class="fas fa-cogs"></i> System Settings v8.8.0</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="space-y-3">
                     <div><label class="text-gray-400 text-sm">Company Logo</label>
@@ -4063,12 +4218,16 @@
                                 </div>
                             </div>
                             <div class="flex items-center justify-between">
-                                <label class="text-gray-400 text-xs">Auto-Sync Weekly Commission</label>
-                                <span class="text-green-400 text-xs"><i class="fas fa-check-circle"></i> Always ON</span>
+                                <label class="text-gray-400 text-xs">Commission Cycle</label>
+                                <span class="text-green-400 text-xs"><i class="fas fa-check-circle"></i> Sunday-Saturday</span>
                             </div>
                             <div class="flex items-center justify-between">
                                 <label class="text-gray-400 text-xs">Weekly Report Archive</label>
                                 <span class="text-cyan-400 text-xs"><i class="fas fa-archive"></i> ${(appData.commissionWeekly.archives || []).length} archived weeks</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-gray-400 text-xs">Auto-Commission Refresh</label>
+                                <span class="text-green-400 text-xs"><i class="fas fa-check-circle"></i> Always ON</span>
                             </div>
                         </div>
                     </div>
@@ -4103,21 +4262,21 @@
                 <button onclick="resetSystem()" class="bg-red-600 p-2 rounded"><i class="fas fa-trash"></i> Reset to Default</button>
                 ${firebaseInitialized ? `<button onclick="pullFromFirebase()" class="bg-purple-600 p-2 rounded"><i class="fas fa-cloud-download-alt"></i> Pull from Cloud</button>` : ''}
                 <button onclick="clearActivityLog()" class="bg-yellow-600 p-2 rounded"><i class="fas fa-eraser"></i> Clear Activity Log</button>
-                <button onclick="forceWeeklyCommissionRecalc()" class="bg-purple-600 p-2 rounded"><i class="fas fa-sync"></i> Recalc Weekly Commission</button>
-                <button onclick="archiveCurrentWeek()" class="bg-indigo-600 p-2 rounded"><i class="fas fa-archive"></i> Archive Current Week</button>
+                <button onclick="refreshAllCommissions(); renderApp();" class="bg-purple-600 p-2 rounded"><i class="fas fa-sync"></i> Recalc All Commissions</button>
+                <button onclick="archiveAllWeeks()" class="bg-indigo-600 p-2 rounded"><i class="fas fa-archive"></i> Archive All Weeks</button>
             </div>
             <div class="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
                 <div class="text-gray-400">System Info</div>
-                <div>Version: 8.7.7 Enhanced | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
+                <div>Version: 8.8.0 Enhanced (Sunday-Saturday Commission Cycle) | Last Saved: ${localStorage.getItem('8068_system_last_saved_v8') ? new Date(localStorage.getItem('8068_system_last_saved_v8')).toLocaleString() : 'Never'}</div>
                 <div>Records: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff</div>
                 <div>Credit Records: ${(appData.credits || []).length} | Outstanding: ₱${(appData.credits || []).reduce((sum, c) => sum + (c.balance || 0), 0).toFixed(2)}</div>
                 <div>Commission Entries: ${Object.keys(appData.commissionMatrix || {}).length}</div>
                 <div>Open Services: ${appData.openServices.filter(s=>s.status!=='completed').length}</div>
                 <div class="mt-1 text-green-400">✅ All Export (Excel/PDF/CSV) & Print Functions Working</div>
-                <div class="mt-1 text-cyan-400">📊 Weekly Commission auto-sync with archive (resets every Saturday)</div>
-                <div class="mt-1 text-green-400">📋 Weekly reports archived for monthly/yearly tracking</div>
-                <div class="mt-1 text-cyan-400">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</div>
-                <div class="mt-1 text-green-400">📊 Periodic reports (Weekly/Monthly/Yearly) auto-saved to Firebase</div>
+                <div class="mt-1 text-cyan-400">📊 Sunday-Saturday Weekly Commission Cycle (Auto-Sync)</div>
+                <div class="mt-1 text-cyan-400">📋 Monthly and Yearly Reports Auto-Generated</div>
+                <div class="mt-1 text-green-400">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</div>
+                <div class="mt-1 text-green-400">📊 Today's Commission = Commission from Today's Transactions only</div>
                 ${firebaseInitialized && isFirebasePrimary ? `<div class="mt-1 text-green-400">🌐 Firebase: Connected (Online) - ${firebaseConfig.databaseURL || 'Custom'} | Auto-sync: ON</div>` : `<div class="mt-1 text-yellow-400">🌐 Firebase: Disconnected - Using local cache</div>`}
                 <div class="mt-1 text-green-400">🔧 Data sanitization removes undefined values before syncing</div>
                 <div class="mt-1 text-cyan-400">🎨 Customizable UI Labels for panels and modals</div>
@@ -4126,139 +4285,12 @@
         </div>`;
     }
 
-    // Archive current week
-    window.archiveCurrentWeek = function() {
-        const current = appData.commissionWeekly.current;
-        if (current && current.weekStart && Object.keys(current.staff).length > 0) {
-            if (!appData.commissionWeekly.archives) appData.commissionWeekly.archives = [];
-            // Check if already archived
-            const exists = appData.commissionWeekly.archives.some(a => a.weekStart === current.weekStart);
-            if (!exists) {
-                appData.commissionWeekly.archives.push({
-                    weekStart: current.weekStart,
-                    weekLabel: current.weekLabel,
-                    staff: JSON.parse(JSON.stringify(current.staff)),
-                    totals: JSON.parse(JSON.stringify(current.totals)),
-                    dailyBreakdown: JSON.parse(JSON.stringify(current.dailyBreakdown)),
-                    archivedAt: new Date().toISOString()
-                });
-                saveToLocal();
-                alert('✅ Current week archived successfully!');
-                renderApp();
-            } else {
-                alert('⚠️ This week is already archived.');
-            }
-        } else {
-            alert('⚠️ No data to archive for the current week.');
-        }
-    };
-
-    // Force weekly commission recalculation
-    window.forceWeeklyCommissionRecalc = function() {
-        calculateWeeklyCommission();
-        renderApp();
-        alert('Weekly Commission recalculated from all transactions and open services!');
-    };
-
-    // Enhanced Settings Functions
-    window.updateNotificationSetting = (checked) => {
-        appData.systemSettings.enableNotifications = checked;
-        saveToLocal();
-        renderApp();
-        alert(`Notifications ${checked ? 'enabled' : 'disabled'}`);
-    };
-
-    window.updateChartDefaultPeriod = (period) => {
-        appData.systemSettings.chartDefaultPeriod = period;
-        saveToLocal();
-        renderApp();
-        alert(`Chart default period set to ${period.charAt(0).toUpperCase() + period.slice(1)}`);
-        if (currentView === 'dashboard') {
-            updateChartPeriod(period);
-        }
-    };
-
-    window.updateTimeout = () => {
-        const input = document.getElementById('timeoutInput');
-        if (input) {
-            const val = parseInt(input.value);
-            if (val >= 5 && val <= 120) {
-                appData.systemSettings.inactivityTimeout = val;
-                saveToLocal();
-                renderApp();
-                alert(`Inactivity timeout set to ${val} minutes`);
-            } else {
-                alert('Please enter a value between 5 and 120');
-            }
-        }
-    };
-
-    window.clearActivityLog = () => {
-        if(confirm('Clear all activity log entries?')) {
-            appData.systemSettings.activityLog = [];
-            saveToLocal();
+    // Archive all completed weeks
+    window.archiveAllWeeks = function() {
+        if(confirm("Archive all completed weeks? This will preserve historical data.")) {
+            recalculateAllCommissions();
+            alert(`✅ All weeks archived! ${appData.commissionWeekly.archives.length} weeks in archive.`);
             renderApp();
-            alert('Activity log cleared.');
-        }
-    };
-
-    // UI Label Editor
-    window.editUILabel = (key) => {
-        const labels = appData.systemSettings.uiLabels || {};
-        const current = labels[key] || '';
-        const newVal = prompt(`Edit ${key}:`, current);
-        if (newVal !== null) {
-            labels[key] = newVal;
-            appData.systemSettings.uiLabels = labels;
-            saveToLocal();
-            renderApp();
-            alert(`✅ UI Label "${key}" updated to "${newVal}"`);
-        }
-    };
-
-    // Logo Size Update
-    window.updateLogoSize = () => {
-        const input = document.getElementById('logoSizeInput');
-        if (input) {
-            const val = parseInt(input.value);
-            if (val >= 20 && val <= 200) {
-                appData.systemSettings.logoSize = val;
-                saveToLocal();
-                renderApp();
-                alert(`✅ Logo size updated to ${val}px`);
-            } else {
-                alert('Please enter a value between 20 and 200');
-            }
-        }
-    };
-
-    // App Icon Upload
-    window.uploadAppIcon = () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(event) {
-                    appData.systemSettings.appIcon = event.target.result;
-                    saveToLocal();
-                    renderApp();
-                    alert('App icon uploaded successfully!');
-                };
-                reader.readAsDataURL(file);
-            }
-        };
-        input.click();
-    };
-
-    window.removeAppIcon = function() {
-        if(confirm('Remove app icon?')) {
-            appData.systemSettings.appIcon = null;
-            saveToLocal();
-            renderApp();
-            alert('App icon removed.');
         }
     };
 
@@ -4266,7 +4298,7 @@
     window.showFirebaseConfig = function() {
         const currentConfig = firebaseConfig;
         let modalHtml = `<div id="adminModal" class="modal"><div class="modal-content firebase-config-modal">
-            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.7.7</h3>
+            <h3 class="text-xl font-bold mb-4"><i class="fas fa-database"></i> Firebase Configuration v8.8.0</h3>
             <p class="text-sm text-gray-400 mb-4">Enter your Firebase Realtime Database configuration. Get these from your Firebase console.</p>
             <div class="space-y-3">
                 <div><label class="text-gray-400 text-sm">API Key</label><input type="text" id="fbApiKey" class="w-full bg-gray-800 p-2 rounded" value="${currentConfig.apiKey || ''}" placeholder="AIzaSy..."></div>
@@ -4284,9 +4316,9 @@
                 <div class="text-xs text-gray-500 mt-2">
                     <p class="text-yellow-400">⚠️ Your config is stored locally in your browser. Never share your config publicly.</p>
                     <p class="text-cyan-400 mt-1">📖 Get your config from Firebase Console → Project Settings → Your Apps → Web App Config</p>
-                    <p class="text-green-400 mt-1">✅ v8.7.7: Weekly Commission auto-sync with archive</p>
-                    <p class="text-green-400 mt-1">📊 Weekly reports reset every Saturday and auto-archived</p>
-                    <p class="text-green-400 mt-1">📈 Interactive Sales Chart with Daily/Weekly/Monthly views</p>
+                    <p class="text-green-400 mt-1">✅ v8.8.0: Sunday-Saturday Weekly Commission Cycle</p>
+                    <p class="text-green-400 mt-1">📊 Weekly reports auto-archived for historical tracking</p>
+                    <p class="text-green-400 mt-1">📈 Monthly and Yearly Reports Auto-Generated</p>
                     <p class="text-green-400 mt-1">🔄 All transactions and data synchronized in real-time</p>
                     <p class="text-green-400 mt-1">⚡ Offline support - data syncs when connection is restored</p>
                 </div>
@@ -4396,7 +4428,7 @@
     // ======================== DAILY TRANSACTION MANAGEMENT ========================
     function renderDailyTransactionManagement() {
         if(showLogin) return renderLogin();
-        recalculateStaffCommissions();
+        recalculateAllCommissions();
 
         const today = new Date().toISOString().slice(0,10);
         let dailyTx = appData.transactions.filter(t => t.date.startsWith(today));
@@ -4534,23 +4566,19 @@
         </div>`;
     }
 
-    // ======================== ENHANCED WEEKLY COMMISSION REPORT WITH ARCHIVE ========================
+    // ======================== ENHANCED WEEKLY COMMISSION REPORT ========================
     function renderWeeklyCommissionReport() {
         if(showLogin) return renderLogin();
         
-        // Auto-calculate from all transactions and open services
+        // Ensure commissions are up to date
+        recalculateAllCommissions();
+        
         const weeklyData = getWeeklyCommission();
         const staffData = weeklyData.staff || {};
-        const totals = weeklyData.totals || { commission: 0, sales: 0, jobs: 0 };
-        const weekStartStr = weeklyData.weekStart || new Date().toISOString().slice(0,10);
-        const weekLabel = weeklyData.weekLabel || '';
+        const totals = weeklyData.totals || { commission: 0, sales: 0, jobs: 0, transactions: 0 };
+        const weekLabel = weeklyData.weekLabel || getWeekLabel(new Date());
         const dailyBreakdown = weeklyData.dailyBreakdown || {};
         
-        const now = new Date();
-        const weekEnd = new Date(now);
-        weekEnd.setDate(now.getDate() + (6 - now.getDay()));
-        const weekEndStr = weekEnd.toISOString().slice(0,10);
-
         // Daily breakdown rows
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         let dailyRows = days.map(day => {
@@ -4568,6 +4596,7 @@
         let grandTotal = 0;
         let grandJobs = 0;
         let grandSales = 0;
+        let grandTransactions = 0;
         let grandSunday = 0, grandMonday = 0, grandTuesday = 0, grandWednesday = 0, grandThursday = 0, grandFriday = 0, grandSaturday = 0;
         let grandPart1 = 0, grandPart2 = 0;
         
@@ -4647,7 +4676,7 @@
                         const total = a.totals?.commission || 0;
                         const staffCount = Object.keys(a.staff || {}).length;
                         return `<div class="report-archive-card" onclick="viewArchivedWeek('${a.weekStart}')">
-                            <div class="archive-title">Week of ${a.weekLabel || a.weekStart}</div>
+                            <div class="archive-title">${a.weekLabel || a.weekStart}</div>
                             <div class="archive-date">${new Date(a.archivedAt).toLocaleDateString()}</div>
                             <div class="archive-total">₱${total.toFixed(2)}</div>
                             <div class="archive-stats">${staffCount} staff | ${a.totals?.jobs || 0} jobs</div>
@@ -4657,24 +4686,22 @@
             </div>`;
         }
 
-        // Live update badge
-        const lastUpdated = localStorage.getItem('8068_weekly_calc_time') ? 
-            new Date(localStorage.getItem('8068_weekly_calc_time')).toLocaleString() : 
-            'Just now';
+        // Get monthly and yearly summaries
+        const monthlyReport = getPeriodicReport('monthly');
+        const yearlyReport = getPeriodicReport('yearly');
 
         return `<div class="card-premium p-6">
             <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <div>
                     <h3 class="text-2xl font-bold"><i class="fas fa-calendar-week"></i> Weekly Commission Report</h3>
-                    <p class="text-sm text-gray-400">${weekLabel || `${weekStartStr} to ${weekEndStr}`}</p>
+                    <p class="text-sm text-cyan-400">${weekLabel}</p>
+                    <p class="text-xs text-gray-400"><i class="fas fa-info-circle"></i> Sunday to Saturday Payroll Cycle</p>
                     <p class="text-xs text-green-400"><i class="fas fa-sync"></i> Auto-synced from all transactions & open services</p>
-                    <p class="text-xs text-cyan-400"><i class="fas fa-info-circle"></i> Resets every Saturday | ${Object.keys(staffData).length} staff active</p>
                     ${firebaseInitialized && isFirebasePrimary ? `<p class="text-xs text-cyan-400"><i class="fas fa-cloud"></i> Online Mode</p>` : ''}
                 </div>
                 <div class="flex gap-2 flex-wrap">
-                    <span class="text-xs text-purple-400 bg-purple-900/30 px-3 py-1 rounded-full"><i class="fas fa-circle text-green-400 text-[8px] mr-1"></i> Live: ${lastUpdated}</span>
-                    <button onclick="forceWeeklyCommissionRecalc()" class="bg-purple-600 px-3 py-1 rounded text-sm hover:bg-purple-700 transition"><i class="fas fa-sync"></i> Refresh</button>
-                    <button onclick="archiveCurrentWeek()" class="bg-indigo-600 px-3 py-1 rounded text-sm hover:bg-indigo-700 transition"><i class="fas fa-archive"></i> Archive</button>
+                    <span class="text-xs text-purple-400 bg-purple-900/30 px-3 py-1 rounded-full"><i class="fas fa-circle text-green-400 text-[8px] mr-1"></i> Live</span>
+                    <button onclick="refreshAllCommissions(); renderApp();" class="bg-purple-600 px-3 py-1 rounded text-sm hover:bg-purple-700 transition"><i class="fas fa-sync"></i> Refresh</button>
                     <button onclick="exportWeeklyCommissionExcel()" class="excel-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
                     <button onclick="exportWeeklyCommissionPDF()" class="pdf-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
                     <button onclick="exportWeeklyCommissionCSV()" class="csv-export-btn px-4 py-2 rounded text-sm text-white"><i class="fas fa-file-csv"></i> CSV</button>
@@ -4682,8 +4709,8 @@
                 </div>
             </div>
             
-            <!-- Daily Breakdown -->
-            <div class="grid grid-cols-3 gap-4 mb-4">
+            <!-- Summary Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <div class="bg-gray-800/30 p-3 rounded-lg text-center">
                     <div class="text-xs text-gray-400">Total Commission</div>
                     <div class="text-2xl font-bold text-green-400">₱${grandTotal.toFixed(2)}</div>
@@ -4695,6 +4722,22 @@
                 <div class="bg-gray-800/30 p-3 rounded-lg text-center">
                     <div class="text-xs text-gray-400">Total Jobs</div>
                     <div class="text-2xl font-bold text-yellow-400">${grandJobs}</div>
+                </div>
+                <div class="bg-gray-800/30 p-3 rounded-lg text-center">
+                    <div class="text-xs text-gray-400">Transactions</div>
+                    <div class="text-2xl font-bold text-purple-400">${totals.transactions || 0}</div>
+                </div>
+            </div>
+            
+            <!-- Monthly and Yearly Quick Stats -->
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="bg-gray-800/20 p-2 rounded-lg text-center">
+                    <div class="text-xs text-gray-400">Monthly Commission (${monthlyReport?.month || 'N/A'})</div>
+                    <div class="text-lg font-bold text-blue-400">₱${(monthlyReport?.totals?.commission || 0).toFixed(2)}</div>
+                </div>
+                <div class="bg-gray-800/20 p-2 rounded-lg text-center">
+                    <div class="text-xs text-gray-400">Yearly Commission (${yearlyReport?.year || 'N/A'})</div>
+                    <div class="text-lg font-bold text-indigo-400">₱${(yearlyReport?.totals?.commission || 0).toFixed(2)}</div>
                 </div>
             </div>
             
@@ -4846,7 +4889,7 @@
     // ======================== TRANSACTION TRACKING ========================
     function renderTransactionTracking() {
         if(showLogin) return renderLogin();
-        recalculateStaffCommissions();
+        recalculateAllCommissions();
 
         const now = new Date();
         let filteredTx = [];
@@ -4857,11 +4900,10 @@
             filteredTx = appData.transactions.filter(t => t.date.startsWith(todayStr));
             filterLabel = 'Today';
         } else if (transactionFilter === 'weekly') {
-            const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay());
+            const weekStart = getWeekStart(now);
             const weekStartStr = weekStart.toISOString().slice(0,10);
             filteredTx = appData.transactions.filter(t => t.date >= weekStartStr);
-            filterLabel = 'This Week';
+            filterLabel = `This Week (${getWeekLabel(now)})`;
         } else if (transactionFilter === 'monthly') {
             const month = now.getMonth();
             const year = now.getFullYear();
@@ -4869,11 +4911,11 @@
                 const d = new Date(t.date);
                 return d.getMonth() === month && d.getFullYear() === year;
             });
-            filterLabel = 'This Month';
+            filterLabel = `${now.toLocaleString('default', { month: 'long' })} ${year}`;
         } else if (transactionFilter === 'yearly') {
             const year = now.getFullYear();
             filteredTx = appData.transactions.filter(t => new Date(t.date).getFullYear() === year);
-            filterLabel = 'This Year';
+            filterLabel = `Year ${year}`;
         }
 
         filteredTx.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -5016,8 +5058,7 @@
                 t.total = newAmt;
                 t.subtotal = newAmt;
                 saveToLocal();
-                recalculateStaffCommissions();
-                triggerWeeklyCommissionUpdate();
+                refreshAllCommissions();
                 renderApp();
                 alert("✅ Amount updated! Commissions recalculated.");
             }
@@ -5113,8 +5154,7 @@
         }
         if(remarks !== undefined) t.remarks = remarks;
         saveToLocal();
-        recalculateStaffCommissions();
-        triggerWeeklyCommissionUpdate();
+        refreshAllCommissions();
         closeAdminModal();
         alert("✅ Transaction updated! Commissions recalculated.");
         renderApp();
@@ -5127,8 +5167,7 @@
         appData.credits = appData.credits.filter(c => c.transactionId !== id);
         appData.transactions.splice(txIndex, 1);
         if (tx) addActivityLog('Transaction Deleted', `${tx.id} - ₱${tx.total.toFixed(2)}`);
-        recalculateStaffCommissions();
-        triggerWeeklyCommissionUpdate();
+        refreshAllCommissions();
         saveToLocal();
         renderApp();
         alert("✅ Transaction deleted and commissions updated!");
@@ -5286,8 +5325,7 @@
             const todayStr = now.toISOString().slice(0,10);
             filteredTx = appData.transactions.filter(t => t.date.startsWith(todayStr));
         } else if (transactionFilter === 'weekly') {
-            const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay());
+            const weekStart = getWeekStart(now);
             filteredTx = appData.transactions.filter(t => t.date >= weekStart.toISOString().slice(0,10));
         } else if (transactionFilter === 'monthly') {
             const month = now.getMonth();
@@ -5329,8 +5367,7 @@
             const todayStr = now.toISOString().slice(0,10);
             filteredTx = appData.transactions.filter(t => t.date.startsWith(todayStr));
         } else if (transactionFilter === 'weekly') {
-            const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay());
+            const weekStart = getWeekStart(now);
             filteredTx = appData.transactions.filter(t => t.date >= weekStart.toISOString().slice(0,10));
         } else if (transactionFilter === 'monthly') {
             const month = now.getMonth();
@@ -5370,8 +5407,7 @@
             const todayStr = now.toISOString().slice(0,10);
             filteredTx = appData.transactions.filter(t => t.date.startsWith(todayStr));
         } else if (transactionFilter === 'weekly') {
-            const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay());
+            const weekStart = getWeekStart(now);
             filteredTx = appData.transactions.filter(t => t.date >= weekStart.toISOString().slice(0,10));
         } else if (transactionFilter === 'monthly') {
             const month = now.getMonth();
@@ -5464,11 +5500,7 @@
             });
         }
         saveToLocal();
-        recalculateStaffCommissions();
-        generatePeriodicReport('weekly');
-        generatePeriodicReport('monthly');
-        generatePeriodicReport('yearly');
-        triggerWeeklyCommissionUpdate();
+        refreshAllCommissions();
         addActivityLog('Manual Transaction Added', `${transaction.id} - ₱${amount.toFixed(2)}`);
         closeAdminModal();
         renderApp();
@@ -5478,6 +5510,10 @@
     // ======================== REPORT SUMMARIES ========================
     function renderReportSummaries() {
         if(showLogin) return renderLogin();
+        
+        // Ensure commissions are up to date
+        recalculateAllCommissions();
+        
         const today = new Date();
         const currentMonth = today.getMonth();
         const currentYear = today.getFullYear();
@@ -5488,21 +5524,26 @@
         const dailyCommission = appData.transactions
             .filter(t => t.date.startsWith(todayStr) && t.staffCommissions)
             .reduce((sum, t) => sum + Object.values(t.staffCommissions).reduce((s, st) => s + (st.commission || 0), 0), 0);
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() - today.getDay());
+        
+        const weekStart = getWeekStart(today);
         const weekStartStr = weekStart.toISOString().slice(0,10);
         const weekTx = appData.transactions.filter(t => t.date >= weekStartStr);
         const weeklySales = weekTx.reduce((s,t)=>s+t.total,0);
         const weeklyExpenses = appData.expenses.filter(e => e.date >= weekStartStr).reduce((s,e)=>s+e.amount,0);
-        const weeklyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
+        const weeklyCommission = appData.staff.reduce((sum, s) => sum + (s.weeklyCommission || 0), 0);
+        
         const monthTx = appData.transactions.filter(t => new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear);
         const monthlySales = monthTx.reduce((s,t)=>s+t.total,0);
         const monthlyExpenses = appData.expenses.filter(e => new Date(e.date).getMonth() === currentMonth && new Date(e.date).getFullYear() === currentYear).reduce((s,e)=>s+e.amount,0);
         const monthlyCommission = appData.staff.reduce((sum, s) => sum + (s.monthlyCommission || 0), 0);
+        
         const yearTx = appData.transactions.filter(t => new Date(t.date).getFullYear() === currentYear);
         const yearlySales = yearTx.reduce((s,t)=>s+t.total,0);
         const yearlyExpenses = appData.expenses.filter(e => new Date(e.date).getFullYear() === currentYear).reduce((s,e)=>s+e.amount,0);
-        const yearlyCommission = appData.staff.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
+        const yearlyCommission = appData.staff.reduce((sum, s) => sum + (s.yearlyCommission || 0), 0);
+        
+        // Get week label
+        const weekLabel = getWeekLabel(today);
         
         return `<div class="grid lg:grid-cols-2 gap-6">
             <div class="card-premium p-6">
@@ -5515,19 +5556,19 @@
                 </div>
                 <div class="grid grid-cols-2 gap-3 mb-4">
                     <div class="bg-gray-800 p-3 rounded-lg text-center">
-                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? 'This Week' : reportPeriod === 'monthly' ? 'This Month' : 'This Year'} Sales</div>
+                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? weekLabel : reportPeriod === 'monthly' ? `This Month (${today.toLocaleString('default', { month: 'long' })})` : `This Year (${currentYear})`} Sales</div>
                         <div class="stat-number text-green-400">₱${reportPeriod === 'daily' ? dailySales : reportPeriod === 'weekly' ? weeklySales : reportPeriod === 'monthly' ? monthlySales : yearlySales}</div>
                     </div>
                     <div class="bg-gray-800 p-3 rounded-lg text-center">
-                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? 'This Week' : reportPeriod === 'monthly' ? 'This Month' : 'This Year'} Expenses</div>
+                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? weekLabel : reportPeriod === 'monthly' ? `This Month (${today.toLocaleString('default', { month: 'long' })})` : `This Year (${currentYear})`} Expenses</div>
                         <div class="stat-number text-red-400">₱${reportPeriod === 'daily' ? dailyExpenses : reportPeriod === 'weekly' ? weeklyExpenses : reportPeriod === 'monthly' ? monthlyExpenses : yearlyExpenses}</div>
                     </div>
                     <div class="bg-gray-800 p-3 rounded-lg text-center">
-                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? 'This Week' : reportPeriod === 'monthly' ? 'This Month' : 'This Year'} Commission</div>
+                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? weekLabel : reportPeriod === 'monthly' ? `This Month (${today.toLocaleString('default', { month: 'long' })})` : `This Year (${currentYear})`} Commission</div>
                         <div class="stat-number text-purple-400">₱${reportPeriod === 'daily' ? dailyCommission : reportPeriod === 'weekly' ? weeklyCommission : reportPeriod === 'monthly' ? monthlyCommission : yearlyCommission}</div>
                     </div>
                     <div class="bg-gray-800 p-3 rounded-lg text-center">
-                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? 'This Week' : reportPeriod === 'monthly' ? 'This Month' : 'This Year'} Profit</div>
+                        <div class="stat-label">${reportPeriod === 'daily' ? 'Today' : reportPeriod === 'weekly' ? weekLabel : reportPeriod === 'monthly' ? `This Month (${today.toLocaleString('default', { month: 'long' })})` : `This Year (${currentYear})`} Profit</div>
                         <div class="stat-number text-cyan-400">₱${(reportPeriod === 'daily' ? dailySales - dailyExpenses : reportPeriod === 'weekly' ? weeklySales - weeklyExpenses : reportPeriod === 'monthly' ? monthlySales - monthlyExpenses : yearlySales - yearlyExpenses).toFixed(2)}</div>
                     </div>
                 </div>
@@ -5582,7 +5623,10 @@
     // ======================== COMMISSION REPORTS ========================
     function renderCommissionReports() {
         if(showLogin) return renderLogin();
-        if (!appData.reports) appData.reports = { weekly: [], monthly: [], yearly: [] };
+        
+        // Ensure commissions are up to date
+        recalculateAllCommissions();
+        
         const weeklyReport = getPeriodicReport('weekly');
         const monthlyReport = getPeriodicReport('monthly');
         const yearlyReport = getPeriodicReport('yearly');
@@ -5615,12 +5659,14 @@
                     <div>
                         <h3 class="text-2xl font-bold"><i class="fas fa-percent"></i> Staff Commission Summary</h3>
                         <p class="text-sm text-gray-400">Total Commission: <span class="text-green-400 font-bold">₱${totalCommission.toFixed(2)}</span></p>
+                        <p class="text-xs text-cyan-400">Sunday-Saturday Payroll Cycle</p>
                         ${archiveStats}
                     </div>
                     <div class="flex gap-2 flex-wrap">
                         <button onclick="exportCommissionReport()" class="excel-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-excel"></i> Excel</button>
                         <button onclick="exportCommissionPDF()" class="pdf-export-btn px-3 py-1 rounded text-sm text-white"><i class="fas fa-file-pdf"></i> PDF</button>
                         <button onclick="printCommissionSummary()" class="bg-cyan-600 px-3 py-1 rounded text-sm"><i class="fas fa-print"></i> Print</button>
+                        <button onclick="refreshAllCommissions(); renderApp();" class="bg-purple-600 px-3 py-1 rounded text-sm"><i class="fas fa-sync"></i> Refresh</button>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -5670,49 +5716,47 @@
                 <div class="card-premium p-4">
                     <h4 class="font-bold text-cyan-400 mb-2"><i class="fas fa-calendar-week"></i> Weekly Report</h4>
                     <div class="text-sm space-y-1">
-                        <div>Period: <span class="text-gray-400">${weeklyReport.periodLabel || 'N/A'}</span></div>
-                        <div>Transactions: <span class="text-yellow-400">${weeklyReport.totalTransactions || 0}</span></div>
-                        <div>Sales: <span class="text-green-400">₱${(weeklyReport.totalSales || 0).toFixed(2)}</span></div>
-                        <div>Commission: <span class="text-blue-400">₱${(weeklyReport.totalCommission || 0).toFixed(2)}</span></div>
+                        <div>Period: <span class="text-gray-400">${weeklyReport?.weekLabel || 'N/A'}</span></div>
+                        <div>Transactions: <span class="text-yellow-400">${weeklyReport?.totals?.transactions || 0}</span></div>
+                        <div>Sales: <span class="text-green-400">₱${(weeklyReport?.totals?.sales || 0).toFixed(2)}</span></div>
+                        <div>Commission: <span class="text-blue-400">₱${(weeklyReport?.totals?.commission || 0).toFixed(2)}</span></div>
                         <button onclick="exportPeriodicReport('weekly')" class="excel-export-btn mt-2 px-2 py-1 rounded text-xs text-white"><i class="fas fa-file-excel"></i> Export</button>
                     </div>
                 </div>
                 <div class="card-premium p-4">
                     <h4 class="font-bold text-yellow-400 mb-2"><i class="fas fa-calendar-alt"></i> Monthly Report</h4>
                     <div class="text-sm space-y-1">
-                        <div>Period: <span class="text-gray-400">${monthlyReport.periodLabel || 'N/A'}</span></div>
-                        <div>Transactions: <span class="text-yellow-400">${monthlyReport.totalTransactions || 0}</span></div>
-                        <div>Sales: <span class="text-green-400">₱${(monthlyReport.totalSales || 0).toFixed(2)}</span></div>
-                        <div>Commission: <span class="text-blue-400">₱${(monthlyReport.totalCommission || 0).toFixed(2)}</span></div>
+                        <div>Period: <span class="text-gray-400">${monthlyReport?.month || 'N/A'}</span></div>
+                        <div>Transactions: <span class="text-yellow-400">${monthlyReport?.totals?.transactions || 0}</span></div>
+                        <div>Sales: <span class="text-green-400">₱${(monthlyReport?.totals?.sales || 0).toFixed(2)}</span></div>
+                        <div>Commission: <span class="text-blue-400">₱${(monthlyReport?.totals?.commission || 0).toFixed(2)}</span></div>
                         <button onclick="exportPeriodicReport('monthly')" class="excel-export-btn mt-2 px-2 py-1 rounded text-xs text-white"><i class="fas fa-file-excel"></i> Export</button>
                     </div>
                 </div>
                 <div class="card-premium p-4">
                     <h4 class="font-bold text-purple-400 mb-2"><i class="fas fa-calendar"></i> Yearly Report</h4>
                     <div class="text-sm space-y-1">
-                        <div>Period: <span class="text-gray-400">${yearlyReport.periodLabel || 'N/A'}</span></div>
-                        <div>Transactions: <span class="text-yellow-400">${yearlyReport.totalTransactions || 0}</span></div>
-                        <div>Sales: <span class="text-green-400">₱${(yearlyReport.totalSales || 0).toFixed(2)}</span></div>
-                        <div>Commission: <span class="text-blue-400">₱${(yearlyReport.totalCommission || 0).toFixed(2)}</span></div>
+                        <div>Period: <span class="text-gray-400">${yearlyReport?.year || 'N/A'}</span></div>
+                        <div>Transactions: <span class="text-yellow-400">${yearlyReport?.totals?.transactions || 0}</span></div>
+                        <div>Sales: <span class="text-green-400">₱${(yearlyReport?.totals?.sales || 0).toFixed(2)}</span></div>
+                        <div>Commission: <span class="text-blue-400">₱${(yearlyReport?.totals?.commission || 0).toFixed(2)}</span></div>
                         <button onclick="exportPeriodicReport('yearly')" class="excel-export-btn mt-2 px-2 py-1 rounded text-xs text-white"><i class="fas fa-file-excel"></i> Export</button>
                     </div>
                 </div>
             </div>
             <div class="flex gap-2 justify-center">
-                <button onclick="regenerateCommissionReport('weekly')" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-sync"></i> Refresh Weekly Report</button>
-                <button onclick="regenerateCommissionReport('monthly')" class="bg-yellow-600 px-4 py-2 rounded text-sm"><i class="fas fa-sync"></i> Refresh Monthly Report</button>
-                <button onclick="regenerateCommissionReport('yearly')" class="bg-purple-600 px-4 py-2 rounded text-sm"><i class="fas fa-sync"></i> Refresh Yearly Report</button>
+                <button onclick="refreshAllCommissions(); renderApp();" class="bg-cyan-600 px-4 py-2 rounded text-sm"><i class="fas fa-sync"></i> Refresh All Reports</button>
             </div>
         </div>`;
     }
 
     window.exportPeriodicReport = (period) => {
         const report = getPeriodicReport(period);
-        if (!report || !report.staffCommissions) {
+        if (!report || !report.staff) {
             alert('No report data available. Generate report first.');
             return;
         }
-        const data = Object.values(report.staffCommissions).map(s => ({
+        const data = Object.values(report.staff).map(s => ({
             name: s.name || 'Unknown',
             position: s.position || 'Staff',
             tier: `${s.tier || 0}%`,
@@ -5725,8 +5769,8 @@
             position: '',
             tier: '',
             jobs: data.reduce((sum, d) => sum + (d.jobs || 0), 0),
-            sales: `₱${report.totalSales.toFixed(2)}`,
-            commission: `₱${report.totalCommission.toFixed(2)}`
+            sales: `₱${(report.totals?.sales || 0).toFixed(2)}`,
+            commission: `₱${(report.totals?.commission || 0).toFixed(2)}`
         });
         const columns = [
             { key: 'name', header: 'Staff Name' },
@@ -5736,15 +5780,11 @@
             { key: 'sales', header: 'Sales' },
             { key: 'commission', header: 'Commission' }
         ];
-        generateExcel(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission Report`, `${period}_commission`);
-        generatePDF(data, columns, `${period.charAt(0).toUpperCase() + period.slice(1)} Commission Report`, `${period}_commission`, appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
-        generateCSV(data, columns, `${period}_commission`);
-    };
-
-    window.regenerateCommissionReport = (period) => {
-        generatePeriodicReport(period);
-        renderApp();
-        alert(`✅ ${period.charAt(0).toUpperCase() + period.slice(1)} report regenerated and saved!`);
+        const periodLabel = period.charAt(0).toUpperCase() + period.slice(1);
+        const filename = `${period}_commission`;
+        generateExcel(data, columns, `${periodLabel} Commission Report`, filename);
+        generatePDF(data, columns, `${periodLabel} Commission Report`, filename, appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
+        generateCSV(data, columns, filename);
     };
 
     // ======================== CREDIT MANAGEMENT ========================
@@ -6105,7 +6145,7 @@
 
     // ======================== EXPORT WRAPPERS (additional) ========================
     window.exportCommissionPDF = function() {
-        recalculateStaffCommissions();
+        recalculateAllCommissions();
         const data = appData.staff.map(s => ({
             name: s.name,
             position: s.position,
@@ -6328,8 +6368,7 @@
         const dailyTx = appData.transactions.filter(t => t.date.startsWith(todayStr));
         const dailySales = dailyTx.reduce((s,t)=>s+t.total,0);
         const dailyExpenses = appData.expenses.filter(e => e.date === todayStr).reduce((s,e)=>s+e.amount,0);
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() - today.getDay());
+        const weekStart = getWeekStart(today);
         const weekStartStr = weekStart.toISOString().slice(0,10);
         const weekTx = appData.transactions.filter(t => t.date >= weekStartStr);
         const weeklySales = weekTx.reduce((s,t)=>s+t.total,0);
@@ -6357,7 +6396,7 @@
         generatePDF(data, columns, 'Report Summary', 'report_summary', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
     window.exportWeeklyCommissionExcel = function() {
-        // Use the auto-calculated weekly data
+        recalculateAllCommissions();
         const weeklyData = getWeeklyCommission();
         const staffData = weeklyData.staff || {};
         const data = Object.values(staffData).map(s => ({
@@ -6395,6 +6434,7 @@
         generateExcel(data, columns, 'Weekly Commission', 'weekly_commission');
     };
     window.exportWeeklyCommissionPDF = function() {
+        recalculateAllCommissions();
         const weeklyData = getWeeklyCommission();
         const staffData = weeklyData.staff || {};
         const data = Object.values(staffData).map(s => ({
@@ -6432,6 +6472,7 @@
         generatePDF(data, columns, 'Weekly Commission Report', 'weekly_commission', appData.systemSettings.companyLogo, appData.systemSettings.logoSize);
     };
     window.exportWeeklyCommissionCSV = function() {
+        recalculateAllCommissions();
         const weeklyData = getWeeklyCommission();
         const staffData = weeklyData.staff || {};
         const data = Object.values(staffData).map(s => ({
@@ -6592,12 +6633,10 @@
             addFirebaseLog('ℹ️ Running in offline mode with local cache. Data will sync when connection is restored.', 'warn');
             updateFirebaseStatus('offline', 'Local Cache');
         }
+        // Initial commission recalculation
+        recalculateAllCommissions();
         renderApp();
         resetInactivityTimer();
-        // Calculate weekly commission on load
-        setTimeout(() => {
-            calculateWeeklyCommission();
-        }, 500);
     });
 
     document.body.innerHTML = `
@@ -6613,7 +6652,7 @@
                     </div>
                     <div class="brand-text">
                         <span class="company-title">8068 CAR SQUARE</span>
-                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.7.7</span></span>
+                        <span class="company-subtitle">One Stop Shop <span class="company-version">| v8.8.0</span></span>
                     </div>
                 </div>
 
@@ -6653,25 +6692,26 @@
             <!-- Main Content -->
             <div id="mainContent" class="mt-2"></div>
 
-            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.7.7 | Auto-Weekly Commission Sync & Archive | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
+            <footer class="text-center text-gray-500 text-sm mt-8 pt-4 border-t border-gray-800">${appData.systemSettings.companyName} | v8.8.0 | Sunday-Saturday Payroll Cycle | ${firebaseInitialized && isFirebasePrimary ? '🌐 Online Mode - Real-time Sync ON' : '📡 Offline Mode - Local Cache'}</footer>
         </div>
     `;
 
     renderApp();
     saveToLocal();
 
-    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.7.7 (Auto-Weekly Commission + Archive)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
+    console.log('%c8068 CAR SQUARE - Enterprise Management System v8.8.0 (Sunday-Saturday Commission Cycle)', 'color: #00d4ff; font-size: 20px; font-weight: bold;');
     console.log(`%cRecords: ${appData.transactions.length} TX | ${appData.customers.length} Customers | ${appData.staff.length} Staff`, 'color: #00ff88;');
     console.log('%c✅ All Export (Excel/PDF/CSV) & Print Functions Fully Operational', 'color: #00ff88;');
-    console.log('%c📊 Weekly Commission auto-sync from POS & Open Services (Real-time)', 'color: #00ff88;');
-    console.log('%c📋 Weekly reports auto-archive after Saturday | Historical tracking', 'color: #00d4ff;');
+    console.log('%c📊 Sunday-Saturday Weekly Commission Cycle (Auto-Sync)', 'color: #00d4ff;');
+    console.log('%c📋 Monthly and Yearly Reports Auto-Generated', 'color: #00d4ff;');
     console.log('%c📈 Interactive Sales Chart with Daily/Weekly/Monthly toggle views', 'color: #00d4ff;');
     console.log('%c📊 Today\'s Commission = Commission from Today\'s Transactions only', 'color: #00ff88;');
     console.log('%c⚡ Reorganized Admin Panel: Daily Transactions & Weekly Commission in sidebar', 'color: #00d4ff;');
-    console.log('%c🔄 v8.7.7: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
+    console.log('%c🔄 v8.8.0: Online Mode with offline support - data syncs when connection is restored', 'color: #00d4ff;');
     console.log('%c👥 Customer Database with full transaction history and credit tracking', 'color: #00d4ff;');
     console.log('%c🛒 POS Panel fully functional with staff assignment, size selection, and open services', 'color: #00d4ff;');
     console.log('%c📋 Auto-Weekly Commission with daily breakdown and archive system', 'color: #00d4ff;');
+    console.log('%c📋 Weekly reports automatically reset every Sunday at 12:00 AM', 'color: #00d4ff;');
     if (!firebaseInitialized || !isFirebasePrimary) {
         console.log('%c⚠️ Click "Admin" → "System Settings" → "Configure Firebase" to connect online', 'color: #ff6b6b;');
     } else {
